@@ -12,7 +12,6 @@ It supports a lot of cool features that make the working process nice:
 * Drivers that activate poses.
 * Directories and hierarchies.
 * Two blend modes, additive and replace for poses.
-* Very fast for complex facial rigs!<br>
-  The rig with 100 poses each one with 100 bones computes in 130fps (amd ryzen 5 3600x)
-
+* Very fast for complex facial rigs! The whole facial rig can be evaluated in 1ms.
+  
 Actually the whole facial rig can be just as simple as a sequence of poses and correctives.
