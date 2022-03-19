@@ -35,3 +35,15 @@ Skeleposer supports a lot of cool features that make the working process nice:
   The whole facial rig can be evaluated in 1ms.
   
 Actually the whole facial rig can be just as simple as a sequence of poses and correctives.
+
+## How to run
+### Compile C++ plugin
+You need Visual Studio and CMake.
+
+### Python script
+Add skeleposerEditor folder to your scripts path and run the following:
+
+```python
+import skeleposerEditor
+skeleposerEditor.skeleposerWindow.show()  
+```
