@@ -12,7 +12,7 @@ You create skeleposer node, make joints, add them to skeleposer and then work wi
 
 ## Features
 Skeleposer supports a lot of cool features that make the working process nice:
-* UI-friendly interface like Shape Editor.
+* UI is very similar to Shape Editor.
 * Duplicate/mirror/flip poses.<br>
   You make a facial rig on left side, then just duplicate & flip. 
   
