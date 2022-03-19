@@ -23,7 +23,7 @@ Skeleposer supports a lot of cool features that make the working process nice:
   It can be used to activate poses in the middle of another pose activation.
 
 * Drivers that activate poses.<br>
-  Unified interface for control connections to poses.
+  Unified interface for control connections.
   
 * Directories and hierarchies.<br>
   You can duplicate/mirror/flip whole folders.
