@@ -56,3 +56,6 @@ Add skeleposerEditor folder to your scripts path and run the following:
 import skeleposerEditor
 skeleposerEditor.skeleposerWindow.show()  
 ```
+
+## Your facial rigs
+It would be very interesting to see your facial rigs done with Skeleposer! Don't be shy to send me your work to azagoruyko@gmail.com.
