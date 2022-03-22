@@ -8,9 +8,18 @@ Briefly, it's like Shape Editor in Maya, but works with transforms and joints. I
 
 ## Basic workflow
 
-You create skeleposer node, make joints, add them to skeleposer and then work with poses. <br>
-Then you connect controls to the poses and that's done!<br>
-In practice, you work with skinCluster and poses at the same time.
+1. **Create skeleposer node**.<br>
+  Each node can controls large number of bones.
+  
+3. **Create joints and add them to skeleposer by pressing "Add joints" button**.<br>
+  You can add/remove joints any time you like.<br>
+  Just make sure that by removing joints you also remove these joints from pose deltas.
+  
+4. **Work with poses**. <br>
+  In practice, you work with skinCluster and poses at the same time.  
+  
+6. **Connect controls to the poses using drivers**.<br>
+  This is a convenient way of connecting controls to poses.
 
 ![skeleposer](https://user-images.githubusercontent.com/9614751/159117978-d545a408-84db-451a-b8e4-73765b5ef404.gif)
 
@@ -44,6 +53,9 @@ Skeleposer supports a lot of cool features that make the working process nice:
 
 Actually the whole facial rig can be just as simple as a sequence of poses and correctives.<br>
 Skeleposer can be transferred into another character as the topology doesn't matter and initial bones positions can easily be adjusted without breaking the system.
+
+## Correctives
+All corrective poses must be placed below other poses. This is a requirement as corrective poses work like patches.
 
 ## How to run
 ### Compile C++ plugin
