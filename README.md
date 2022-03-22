@@ -9,7 +9,7 @@ Briefly, it's like Shape Editor in Maya, but works with transforms and joints. I
 ## Basic workflow
 
 1. **Create skeleposer node**.<br>
-  Each node can controls large number of bones.
+  Each node can control large number of bones.
   
 3. **Create joints and add them to skeleposer by pressing "Add joints" button**.<br>
   You can add/remove joints any time you like.<br>
