@@ -48,7 +48,7 @@ Skeleposer supports a lot of cool features that make the working process nice:
 * **Very fast for complex facial rigs**.<br> 
   The whole facial rig can be evaluated less then 1ms.
 
-* **Final rig is very simple**.
+* **Final rig is very simple**.<br>
   Actually there is a single node called skeleposer does the job. It keeps all the poses each one is very lightweight. So the rig file is really small.
 
 Actually the whole facial rig can be just as simple as a sequence of poses and correctives.<br>
@@ -69,5 +69,17 @@ import skeleposerEditor
 skeleposerEditor.skeleposerWindow.show()  
 ```
 
+## Additional nodes
+There are some other nodes provided by the plugin.
+* **blendMatrix**.<br>
+  This node can be used to *blend* two matrices. This is done with the following approach:<br>
+  a) Translation is linear.<br>
+  b) Rotation is blended with slerp.<br>
+  c) Scale is linear.<br>
+  
+* **stickyMatrix**.<br>
+  This node is used to make "sticky rig" for two indepdendant transforms. It's useful for eye blink, sticky lips (zip) and other stuff.<br>
+  Use `stickyMatrix` module in Rig Builder as a reference: https://github.com/azagoruyko/rigBuilder/blob/main/modules/Tools/StickyMatrix.xml
+  
 ## Your facial rigs
 It would be very interesting to see your facial rigs done with Skeleposer! Don't be shy to send me your work to azagoruyko@gmail.com.
