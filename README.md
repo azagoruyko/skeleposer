@@ -83,11 +83,3 @@ There are some other nodes provided by the plugin.
   
 ## Your facial rigs
 It would be very interesting to see your facial rigs done with Skeleposer! Don't be shy to send me your work to azagoruyko@gmail.com.
-
-## Thanks and gracias
-
-197VXFacHv8VsYR1fQcs65sugBBQm1FSa5 *BTC*<br>
-0x27c561D37a9163ffeAFB9FC9999f088aE4544F3B *ETH*<br>
-0x27c561D37a9163ffeAFB9FC9999f088aE4544F3B *BNB BEP20*<br>
-bnb1jfguvl4dwcg3ldx3vnv9qm23xve237sj5wyz26  *BNB BEP2*<br>
-2N2o6EviF3yhJZ5tSreHshJ77FTkBNz1X5EZMkXN18Z9 *SOLANA*<br>
