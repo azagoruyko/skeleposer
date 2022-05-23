@@ -874,11 +874,41 @@ class ChangeButtonWidget(QWidget):
         newDriver >> skel.node.poses[self.item.poseIndex].poseWeight
         self.labelWidget.setText(getActualWeightInput(skel.node.poses[self.item.poseIndex].poseWeight).name())
 
+class SearchReplaceWindow(QDialog):
+    replaceClicked = Signal(str, str)
+    
+    def __init__(self, **kwargs):
+        super(SearchReplaceWindow, self).__init__(**kwargs)
+        self.setWindowTitle("Search/Replace")
+        layout = QGridLayout()
+        layout.setDefaultPositioning(2, Qt.Horizontal)
+        self.setLayout(layout)
+        
+        self.searchWidget = QLineEdit("L_")
+        self.replaceWidget = QLineEdit("R_")
+        
+        btn = QPushButton("Replace")
+        btn.clicked.connect(self.btnClicked)
+        
+        layout.addWidget(QLabel("Search"))
+        layout.addWidget(self.searchWidget)
+        layout.addWidget(QLabel("Replace"))
+        layout.addWidget(self.replaceWidget)   
+        layout.addWidget(QLabel(""))
+        layout.addWidget(btn)
+        
+    def btnClicked(self):
+        self.replaceClicked.emit(self.searchWidget.text(), self.replaceWidget.text())
+        self.accept()
+
 class TreeWidget(QTreeWidget):
     def __init__(self, **kwargs):
         super(TreeWidget, self).__init__(**kwargs)
 
         self.clipboard = []
+
+        self.searchWindow = SearchReplaceWindow(parent=self)
+        self.searchWindow.replaceClicked.connect(self.searchAndReplace)        
 
         self.setHeaderLabels(["Name", "Value", "Edit", "Driver"])
         if "setSectionResizeMode" in dir(self.header()):
@@ -916,6 +946,9 @@ class TreeWidget(QTreeWidget):
 
             elif key == Qt.Key_D:
                 self.duplicateItems()
+
+            elif key == Qt.Key_R:
+                self.searchWindow.show()                
 
             elif key == Qt.Key_M:
                 self.mirrorItems()
@@ -1003,6 +1036,10 @@ class TreeWidget(QTreeWidget):
             flipAction.triggered.connect(lambda _=None: self.flipItems())
             menu.addAction(flipAction)
 
+            searchReplaceAction = QAction("Search/Replace\tCTRL-R", self)
+            searchReplaceAction.triggered.connect(lambda _=None: self.searchWindow.show())
+            menu.addAction(searchReplaceAction)            
+
             menu.addSeparator()
 
             blendMenu = QMenu("Blend mode", self)
@@ -1056,6 +1093,10 @@ class TreeWidget(QTreeWidget):
         menu.addAction(selectNodeAction)
 
         menu.popup(event.globalPos())
+
+    def searchAndReplace(self, searchText, replaceText):
+        for sel in self.selectedItems():
+            sel.setText(0, sel.text(0).replace(searchText, replaceText))  
 
     @undoBlock
     def addInbetweenPose(self):
@@ -1275,6 +1316,49 @@ class SkeleposerSelectorWidget(QLineEdit):
         else:
             super(SkeleposerSelectorWidget, self).mouseDoubleClickEvent(event)
 
+class BlendSliderWidget(QWidget):
+    def __init__(self, **kwargs):
+        super(BlendSliderWidget, self).__init__(**kwargs)
+
+        self.matrices = {}
+
+        layout = QHBoxLayout()
+        layout.setMargin(0)
+        self.setLayout(layout)
+
+        self.textWidget = QLineEdit("1")
+        self.textWidget.setFixedWidth(40)
+        self.textWidget.setValidator(QDoubleValidator())
+        self.textWidget.editingFinished.connect(self.textChanged)
+
+        self.sliderWidget = QSlider(Qt.Horizontal)
+        self.sliderWidget.setValue(100)
+        self.sliderWidget.setMinimum(0)
+        self.sliderWidget.setMaximum(100)
+        self.sliderWidget.setTracking(True)
+        self.sliderWidget.sliderReleased.connect(self.sliderValueChanged)
+
+        layout.addWidget(self.textWidget)
+        layout.addWidget(self.sliderWidget)
+        layout.addStretch()
+
+    def textChanged(self):
+        value = float(self.textWidget.text())
+        self.sliderWidget.setValue(value*100)
+        self.valueChanged(value)
+
+    def sliderValueChanged(self):
+        value = self.sliderWidget.value()/100.0
+        self.textWidget.setText(str(value))
+        self.valueChanged(value)
+
+    @undoBlock
+    def valueChanged(self, v):        
+        for j in pm.ls(sl=True, type="transform"):
+            data = self.matrices.get(j.name())
+            if data:
+                j.setMatrix(blendMatrices(data["baseMatrix"], data["matrix"], v))
+
 class ToolsWidget(QWidget):
     def __init__(self, **kwargs):
         super(ToolsWidget, self).__init__(**kwargs)
@@ -1295,9 +1379,20 @@ class ToolsWidget(QWidget):
         resetJointsBtn.clicked.connect(lambda: skel.resetToBase(pm.ls(sl=True, type=["joint", "transform"])))
         resetJointsBtn.setIcon(QIcon(RootDirectory+"/icons/reset.png"))
 
+        self.blendSliderWidget = BlendSliderWidget()
+
         layout.addWidget(mirrorJointsBtn)
         layout.addWidget(resetJointsBtn)
+        layout.addWidget(self.blendSliderWidget)
         layout.addStretch()
+
+    def showEvent(self, event):
+        self.blendSliderWidget.matrices = {}
+        for j in skel.getJoints():
+            data = {"matrix": getLocalMatrix(j),
+                    "baseMatrix":  skel.node.baseMatrices[skel.getJointIndex(j)].get()}
+
+            self.blendSliderWidget.matrices[j.name()] = data
 
     def mirrorJoints(self):
         dagPose = skel.dagPose()
