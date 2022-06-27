@@ -184,6 +184,12 @@ class Skeleposer(object):
         if plugs:
             return plugs[0].index()
 
+    def getJointByIndex(self, idx):
+        if self.node.joints[idx].exists():
+            inputs = self.node.joints[idx].inputs()
+            if inputs:
+                return inputs[0]
+
     def clearAll(self):
         for a in self.node.joints:
             pm.removeMultiInstance(a, b=True)
@@ -532,7 +538,7 @@ class Skeleposer(object):
                     connections[a] = inp[0].name()
                     pm.disconnectAttr(connections[a], j.attr(a))
 
-            connectionData[j.name()] = connections
+            connectionData[ja.index()] = connections
 
         self.node.connectionData.set(json.dumps(connectionData))
 
@@ -543,9 +549,10 @@ class Skeleposer(object):
             pm.warning("Already connected")
             return
 
-        for j in connectionData:
-            for a in connectionData[j]:
-                pm.connectAttr(connectionData[j][a], j+"."+a, f=True)
+        for idx in connectionData:
+            for a in connectionData[idx]:
+                j = self.getJointByIndex(idx)
+                pm.connectAttr(connectionData[idx][a], j+"."+a, f=True)
 
         self.node.connectionData.set("{}")
 
