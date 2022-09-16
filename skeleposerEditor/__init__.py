@@ -229,7 +229,7 @@ class Skeleposer(object):
             if inputs and bm.isSettable():
                 bm.set(getLocalMatrix(inputs[0]))
             else:
-                pm.warning("updateBaseMatrices: %s is not connected"%ja.name())
+                pm.warning("updateBaseMatrices: %s is not writable"%ja.name())
 
         self.updateDagPose()
 
@@ -525,7 +525,7 @@ class Skeleposer(object):
         connectionData = json.loads(self.node.connectionData.get())
 
         if connectionData:
-            pm.warning("Already disconnected")
+            pm.warning("Disconnection is skipped")
             return
 
         for ja in self.node.joints:
@@ -546,7 +546,7 @@ class Skeleposer(object):
     def reconnectOutputs(self):
         connectionData = json.loads(self.node.connectionData.get())
         if not connectionData:
-            pm.warning("Already connected")
+            pm.warning("Connection is skipped")
             return
 
         for idx in connectionData:
@@ -1095,11 +1095,36 @@ class TreeWidget(QTreeWidget):
         updateBaseAction.triggered.connect(lambda _=None: skel.updateBaseMatrices())
         menu.addAction(updateBaseAction)
 
+        importExportMenu = QMenu("Import/Export", self)
+        importAction = QAction("Import", self)
+        importAction.triggered.connect(lambda _=None: self.importSkeleposer())
+        importExportMenu.addAction(importAction)
+
+        exportAction = QAction("Export", self)
+        exportAction.triggered.connect(lambda _=None: self.exportSkeleposer())
+        importExportMenu.addAction(exportAction)
+
+        menu.addMenu(importExportMenu)        
+
         selectNodeAction = QAction("Select node", self)
         selectNodeAction.triggered.connect(lambda _=None: pm.select(skel.node))
         menu.addAction(selectNodeAction)
 
         menu.popup(event.globalPos())
+
+    def importSkeleposer(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import skeleposer", "", "*.json")
+        if path:
+            with open(path, "r") as f:
+                data = json.load(f)
+            skel.fromJson(data)
+            self.updateTree()
+
+    def exportSkeleposer(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export skeleposer", "", "*.json")
+        if path:
+            with open(path, "w") as f:
+                json.dump(skel.toJson(), f)        
 
     def searchAndReplace(self, searchText, replaceText):
         for sel in self.selectedItems():
