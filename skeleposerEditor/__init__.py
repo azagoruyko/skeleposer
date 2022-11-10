@@ -5,6 +5,7 @@ from Qt.QtWidgets import *
 import maya.api.OpenMaya as om
 import pymel.core as pm
 import pymel.api as api
+import maya.cmds as cmds
 import re
 import os
 import json
@@ -94,14 +95,55 @@ def symmat(m):
     out.a30 *= -1
     return out
 
+def getDelta(mat, baseMat, parentMat, blendMode): # get delta matrix from pose world matrix
+    if blendMode == 0:
+        offset = pm.dt.Vector(mat.a30 - baseMat.a30, mat.a31 - baseMat.a31, mat.a32 - baseMat.a32)
+        offset *= parentMat.inverse()
+        
+        m = mat * baseMat.inverse()
+        m.a30 = offset.x
+        m.a31 = offset.y
+        m.a32 = offset.z
+
+    elif blendMode == 1:
+        m = mat * parentMat.inverse()
+
+    return m     
+
+def applyDelta(delta, baseMat, parentMat, blendMode): # apply delta and get pose world matrix
+    if blendMode == 0:
+        offset = pm.dt.Vector(delta.a30, delta.a31, delta.a32) * parentMat    
+        
+        m = pm.dt.Matrix(delta * baseMat)
+        m.a30 = baseMat.a30 + offset.x
+        m.a31 = baseMat.a31 + offset.y
+        m.a32 = baseMat.a32 + offset.z
+
+    elif blendMode == 1:
+        m = delta * parentMat
+
+    return m
+
 def parentConstraintMatrix(srcBase, src, destBase):
     return destBase * srcBase.inverse() * src
 
 def dagPose_findIndex(dagPose, j):
     for m in dagPose.members:
-        inputs = m.inputs()
+        inputs = m.inputs(sh=True)
         if inputs and inputs[0] == j:
             return m.index()
+
+def dagPose_getWorldMatrix(dagPose, j):
+    idx = dagPose_findIndex(dagPose, j)
+    if idx is not None:
+        return dagPose.worldMatrix[idx].get()
+                
+def dagPose_getParentMatrix(dagPose, j):
+    idx = dagPose_findIndex(dagPose, j)
+    if idx is not None:
+        parent = dagPose.parents[idx].inputs(p=True, sh=True)
+        if parent and parent[0] != dagPose.world:
+            return dagPose.worldMatrix[parent[0].index()].get()
 
 def getRemapInputPlug(remap):
     inputs = remap.inputValue.inputs(p=True)
@@ -229,7 +271,7 @@ class Skeleposer(object):
             if inputs and bm.isSettable():
                 bm.set(getLocalMatrix(inputs[0]))
             else:
-                pm.warning("updateBaseMatrices: %s is not writable"%ja.name())
+                pm.warning("updateBaseMatrices: %s is not writable. Skipped"%bm.name())
 
         self.updateDagPose()
 
@@ -303,7 +345,7 @@ class Skeleposer(object):
 
         joints = self.getJoints()
         if joints:
-            dp = pm.dagPose(joints, s=True, sl=True, g=True, n=skel.node.name()+"_world_dagPose")
+            dp = pm.dagPose(joints, s=True, sl=True, n=self.node.name()+"_world_dagPose")
             dp.message >> self.node.dagPose
         else:
             pm.warning("updateDagPose: no joints found attached")
@@ -311,7 +353,7 @@ class Skeleposer(object):
     def getJoints(self):
         joints = []
         for ja in self.node.joints:
-            inputs = ja.inputs()
+            inputs = ja.inputs(type=["joint", "transform"])
             if inputs:
                 joints.append(inputs[0])
             else:
@@ -328,6 +370,11 @@ class Skeleposer(object):
             else:
                 pm.warning("getPoseJoints: %s is not connected"%ja.name())
         return joints
+
+    def findPoseIndexByName(self, poseName):
+        for p in self.node.poses:
+            if p.poseName.get() == poseName:
+                return p.index()
 
     def makePose(self, name):
         idx = self.findAvailablePoseIndex()
@@ -428,22 +475,23 @@ class Skeleposer(object):
     def copyPose(self, fromIndex, toIndex, joints=None):
         self.resetDelta(toIndex, joints or self.getPoseJoints(toIndex))
 
+        srcPose = self.node.poses[fromIndex]
+        srcBlendMode = srcPose.poseBlendMode.get()
+
         joints = joints or self.getPoseJoints(fromIndex)
         indices = set([self.getJointIndex(j) for j in joints])
 
         destPose = self.node.poses[toIndex]
-        blendMode = destPose.poseBlendMode.get()
-
-        for mattr in self.node.poses[fromIndex].poseDeltaMatrices:
+        destPose.poseBlendMode.set(srcBlendMode)
+        
+        for mattr in srcPose.poseDeltaMatrices:
             if mattr.index() in indices:
-                if blendMode == 0: # additive
-                    destPose.poseDeltaMatrices[mattr.index()].set(mattr.get())
-
-                elif blendMode == 1: # replace
-                    destPose.poseDeltaMatrices[mattr.index()].set(mattr.get() * self.node.baseMatrices[mattr.index()].get())
+                destPose.poseDeltaMatrices[mattr.index()].set(mattr.get())
 
     def mirrorPose(self, poseIndex):
         dagPose = self.dagPose()
+
+        blendMode = self.node.poses[poseIndex].poseBlendMode.get()
 
         joints = sorted(self.getPoseJoints(poseIndex), key=lambda j: len(j.getAllParents())) # sort by parents number, process parents first
         for j in joints:
@@ -459,19 +507,26 @@ class Skeleposer(object):
             j_mirrored = pm.PyNode(j_mirrored)
             mirror_idx = self.getJointIndex(j_mirrored)
 
-            j_mbase = dagPose.worldMatrix[dagPose_findIndex(dagPose, j)].get()
-            mirrored_mbase = dagPose.worldMatrix[dagPose_findIndex(dagPose, j_mirrored)].get()
+            j_mbase = dagPose_getWorldMatrix(dagPose, j) # get base world matrices
+            mirrored_mbase = dagPose_getWorldMatrix(dagPose, j_mirrored)
 
-            jm = self.node.poses[poseIndex].poseDeltaMatrices[idx].get() * j_mbase
+            j_pm = dagPose_getParentMatrix(dagPose, j) or j.pm.get()
+            mirrored_pm = dagPose_getParentMatrix(dagPose, j_mirrored) or j_mirrored.pm.get()
+
+            delta = self.node.poses[poseIndex].poseDeltaMatrices[idx].get()
+            jm = applyDelta(delta, j_mbase, j_pm, blendMode)
+
             mirrored_m = parentConstraintMatrix(symmat(j_mbase), symmat(jm), mirrored_mbase)
 
             if j == j_mirrored:
                 mirrored_m = blendMatrices(jm, mirrored_m, 0.5)
 
-            self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].set(mirrored_m*mirrored_mbase.inverse())
+            self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].set(getDelta(mirrored_m, mirrored_mbase, mirrored_pm, blendMode))
 
     def flipPose(self, poseIndex):
         dagPose = self.dagPose()
+
+        blendMode = self.node.poses[poseIndex].poseBlendMode.get()
 
         output = {}
         for j in self.getPoseJoints(poseIndex):
@@ -487,17 +542,20 @@ class Skeleposer(object):
             j_mirrored = pm.PyNode(j_mirrored)
             mirror_idx = self.getJointIndex(j_mirrored)
 
-            j_mbase = dagPose.worldMatrix[dagPose_findIndex(dagPose, j)].get()
-            mirrored_mbase = dagPose.worldMatrix[dagPose_findIndex(dagPose, j_mirrored)].get()
+            j_mbase = dagPose_getWorldMatrix(dagPose, j)
+            mirrored_mbase = dagPose_getWorldMatrix(dagPose, j_mirrored)
 
-            jm = self.node.poses[poseIndex].poseDeltaMatrices[idx].get() * j_mbase
-            mirrored_jm = self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].get() * mirrored_mbase
+            j_pm = dagPose_getParentMatrix(dagPose, j) or j.pm.get()
+            mirrored_pm = dagPose_getParentMatrix(dagPose, j_mirrored) or j_mirrored.pm.get()
+
+            jm = applyDelta(self.node.poses[poseIndex].poseDeltaMatrices[idx].get(),  j_mbase, j_pm, blendMode)
+            mirrored_jm = applyDelta(self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].get(), mirrored_mbase, mirrored_pm, blendMode)
 
             m = parentConstraintMatrix(symmat(mirrored_mbase), symmat(mirrored_jm), j_mbase)
             mirrored_m = parentConstraintMatrix(symmat(j_mbase), symmat(jm), mirrored_mbase)
 
-            output[idx] = m*j_mbase.inverse()
-            output[mirror_idx] = mirrored_m*mirrored_mbase.inverse()
+            output[idx] = getDelta(m, j_mbase, j_pm, blendMode)
+            output[mirror_idx] = getDelta(mirrored_m, mirrored_mbase, mirrored_pm, blendMode)
 
         for idx in output:
             self.node.poses[poseIndex].poseDeltaMatrices[idx].set(output[idx])
@@ -505,18 +563,19 @@ class Skeleposer(object):
         self.removeEmptyDeltas(poseIndex)
 
     def changePoseBlendMode(self, poseIndex, blend):
+        dagPose = self.dagPose()
+
         pose = self.node.poses[poseIndex]
+        poseBlend = pose.poseBlendMode.get()
 
         for j in self.getPoseJoints(poseIndex):
             idx = self.getJointIndex(j)
 
-            if blend == 0: # additive
-                delta = pose.poseDeltaMatrices[idx].get()
-                pose.poseDeltaMatrices[idx].set(delta * self.node.baseMatrices[idx].get().inverse())
-
-            elif blend == 1: # replace
-                delta = pose.poseDeltaMatrices[idx].get()
-                pose.poseDeltaMatrices[idx].set(delta * self.node.baseMatrices[idx].get())
+            delta = pose.poseDeltaMatrices[idx].get()
+            bmat = dagPose_getWorldMatrix(dagPose, j)
+            pmat = dagPose_getParentMatrix(dagPose, j)
+            wm = applyDelta(delta, bmat, pmat, poseBlend)
+            pose.poseDeltaMatrices[idx].set(getDelta(wm, bmat, pmat, blend))  
 
         pose.poseBlendMode.set(blend)
 
@@ -545,6 +604,7 @@ class Skeleposer(object):
     @undoBlock
     def reconnectOutputs(self):
         connectionData = json.loads(self.node.connectionData.get())
+
         if not connectionData:
             pm.warning("Connection is skipped")
             return
@@ -600,7 +660,7 @@ class Skeleposer(object):
                 poseBlendMode = pose.poseBlendMode.get()
 
                 if poseBlendMode == 0: # additive
-                    m = scaledMatrix(jmat) * scaledMatrix(baseMatrix).inverse()
+                    m = getDelta(scaledMatrix(jmat), scaledMatrix(baseMatrix), pm.dt.Matrix(), poseBlendMode)
 
                     j_scale = matrixScale(jmat)
                     baseMatrix_scale = matrixScale(baseMatrix)
@@ -690,7 +750,7 @@ class Skeleposer(object):
             a.poseBlendMode.set(p["poseBlendMode"])
 
             for m_idx, m in p["poseDeltaMatrices"].items():
-                a.poseDeltaMatrices[m_idx].set(pm.dt.Matrix(m))
+                a.poseDeltaMatrices[m_idx].set(pm.dt.Matrix(m))     
 
 ####################################################################################
 
@@ -705,6 +765,7 @@ def editButtonClicked(btn, item):
             skel.beginEditPose(item.poseIndex)
             btn.setStyleSheet("background-color: #aaaa55")
             skeleposerWindow.toolsWidget.show()
+
             editPoseIndex = item.poseIndex
         else:
             pm.warning("editButtonClicked: weight must be 1 before editing")
@@ -915,7 +976,7 @@ class TreeWidget(QTreeWidget):
         self.clipboard = []
 
         self.searchWindow = SearchReplaceWindow(parent=self)
-        self.searchWindow.replaceClicked.connect(self.searchAndReplace)        
+        self.searchWindow.replaceClicked.connect(self.searchAndReplace)
 
         self.setHeaderLabels(["Name", "Value", "Edit", "Driver"])
         if "setSectionResizeMode" in dir(self.header()):
@@ -955,7 +1016,7 @@ class TreeWidget(QTreeWidget):
                 self.duplicateItems()
 
             elif key == Qt.Key_R:
-                self.searchWindow.show()                
+                self.searchWindow.show()
 
             elif key == Qt.Key_M:
                 self.mirrorItems()
@@ -1030,10 +1091,10 @@ class TreeWidget(QTreeWidget):
             copyPoseJointsDeltaAction.triggered.connect(lambda _=None: self.copyPoseJointsDelta(pm.ls(sl=True, type=["joint", "transform"])))
             menu.addAction(copyPoseJointsDeltaAction)
 
-            pastePoseDelta = QAction("Paste delta\tCTRL-V", self)
-            pastePoseDelta.triggered.connect(lambda _=None: self.pastePoseDelta())
-            pastePoseDelta.setEnabled(True if self.clipboard else False)
-            menu.addAction(pastePoseDelta)
+            pastePoseDeltaAction = QAction("Paste delta\tCTRL-V", self)
+            pastePoseDeltaAction.triggered.connect(lambda _=None: self.pastePoseDelta())
+            pastePoseDeltaAction.setEnabled(True if self.clipboard else False)
+            menu.addAction(pastePoseDeltaAction)
 
             mirrorAction = QAction("Mirror\tCTRL-M", self)
             mirrorAction.triggered.connect(lambda _=None: self.mirrorItems())
@@ -1045,7 +1106,7 @@ class TreeWidget(QTreeWidget):
 
             searchReplaceAction = QAction("Search/Replace\tCTRL-R", self)
             searchReplaceAction.triggered.connect(lambda _=None: self.searchWindow.show())
-            menu.addAction(searchReplaceAction)            
+            menu.addAction(searchReplaceAction)
 
             menu.addSeparator()
 
@@ -1104,7 +1165,7 @@ class TreeWidget(QTreeWidget):
         exportAction.triggered.connect(lambda _=None: self.exportSkeleposer())
         importExportMenu.addAction(exportAction)
 
-        menu.addMenu(importExportMenu)        
+        menu.addMenu(importExportMenu)
 
         selectNodeAction = QAction("Select node", self)
         selectNodeAction.triggered.connect(lambda _=None: pm.select(skel.node))
@@ -1124,11 +1185,11 @@ class TreeWidget(QTreeWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export skeleposer", "", "*.json")
         if path:
             with open(path, "w") as f:
-                json.dump(skel.toJson(), f)        
+                json.dump(skel.toJson(), f)
 
     def searchAndReplace(self, searchText, replaceText):
         for sel in self.selectedItems():
-            sel.setText(0, sel.text(0).replace(searchText, replaceText))  
+            sel.setText(0, sel.text(0).replace(searchText, replaceText))        
 
     @undoBlock
     def addInbetweenPose(self):
@@ -1169,16 +1230,14 @@ class TreeWidget(QTreeWidget):
     def copyPoseJointsDelta(self, joints=None):
         currentItem = self.currentItem()
         if currentItem and currentItem.poseIndex is not None:
-            self.clipboard.append({"poseIndex": currentItem.poseIndex, "joints":joints})
+            self.clipboard = {"poseIndex": currentItem.poseIndex, "joints":joints}
 
     @undoBlock
     def pastePoseDelta(self):
         if self.clipboard:
-            pasted = self.clipboard.pop()
-
             currentItem = self.currentItem()
             if currentItem and currentItem.poseIndex is not None:
-                skel.copyPose(pasted["poseIndex"], currentItem.poseIndex, pasted["joints"])
+                skel.copyPose(self.clipboard["poseIndex"], currentItem.poseIndex, self.clipboard["joints"])
 
     @undoBlock
     def mirrorItems(self, items=None):
@@ -1441,11 +1500,8 @@ class ToolsWidget(QWidget):
 
             L_m = L_joint.wm.get()
 
-            L_idx = dagPose_findIndex(dagPose, L_joint)
-            R_idx = dagPose_findIndex(dagPose, R_joint)
-
-            L_base = dagPose.worldMatrix[L_idx].get()
-            R_base = dagPose.worldMatrix[R_idx].get()
+            L_base = dagPose_getWorldMatrix(dagPose, L_joint)
+            R_base = dagPose_getWorldMatrix(dagPose, R_joint)
 
             R_m = parentConstraintMatrix(symmat(L_base), symmat(L_m), R_base)
             pm.xform(R_joint, ws=True, m=R_m)
@@ -1709,6 +1765,7 @@ class SkeleposerWindow(QFrame):
         skel = Skeleposer(node)
         self.treeWidget.updateTree()
         self.skeleposerSelectorWidget.setText(str(node))
+        self.toolsWidget.hide()
 
 '''
 def undoRedoCallback():
