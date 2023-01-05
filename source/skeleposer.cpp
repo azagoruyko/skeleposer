@@ -3,7 +3,8 @@
 #include <maya/MGlobal.h>
 #include <maya/MPlug.h>
 #include <maya/MPlugArray.h>
-#include <maya/MMatrix.h>
+#include <maya/MVector.h> 
+#include <maya/MMatrix.h> 
 #include <maya/MAngle.h>
 #include <maya/MFnDependencyNode.h>
 #include <maya/MTransformationMatrix.h>
@@ -53,39 +54,6 @@ MObject Skeleposer::attr_outputRotateZ;
 MObject Skeleposer::attr_outputRotates;
 MObject Skeleposer::attr_outputScales;
 
-void makeMatrixFromEulerAngles(const MVector &r, MMatrix &m)
-{
-    double cos_rz, sin_rz, cos_ry, sin_ry, cos_rx, sin_rx;
-
-    cos_rz = cos(r[2]);
-    cos_ry = cos(r[1]);
-    cos_rx = cos(r[0]);
-
-    sin_rz = sin(r[2]);
-    sin_ry = sin(r[1]);
-    sin_rx = sin(r[0]);
-
-    m[0][0] = cos_rz * cos_ry;
-    m[0][1] = sin_rz * cos_ry;
-    m[0][2] = -sin_ry;
-    m[0][3] = 0;
-
-    m[1][0] = -sin_rz * cos_rx + cos_rz * sin_ry * sin_rx;
-    m[1][1] = cos_rz * cos_rx + sin_rz * sin_ry * sin_rx;
-    m[1][2] = cos_ry * sin_rx;
-    m[1][3] = 0;
-
-    m[2][0] = sin_rz * sin_rx + cos_rz * sin_ry * cos_rx;
-    m[2][1] = -cos_rz * sin_rx + sin_rz * sin_ry * cos_rx;
-    m[2][2] = cos_ry * cos_rx;
-    m[2][3] = 0;
-
-    m[3][0] = 0;
-    m[3][1] = 0;
-    m[3][2] = 0;
-    m[3][3] = 1;
-}
-
 MStatus Skeleposer::compute(const MPlug &plug, MDataBlock &dataBlock)
 {
     if (plug != attr_outputTranslates && plug != attr_outputRotates && plug != attr_outputScales)
@@ -113,11 +81,12 @@ MStatus Skeleposer::compute(const MPlug &plug, MDataBlock &dataBlock)
         if (jointOrientsHandle.jumpToElement(idx) == MS::kSuccess) // if there is an element exists in the idx, get the matrix
         {
             MDataHandle joh = jointOrientsHandle.inputValue();
-            MVector jo(
+            const MVector jo(
                 joh.child(attr_jointOrientX).asAngle().asRadians(),
                 joh.child(attr_jointOrientY).asAngle().asRadians(),
                 joh.child(attr_jointOrientZ).asAngle().asRadians());
-            makeMatrixFromEulerAngles(jo, jnt.jointOrient);
+
+            jnt.jointOrient = MEulerRotation(jo).asQuaternion();
         }
     }
 
@@ -185,11 +154,10 @@ MStatus Skeleposer::compute(const MPlug &plug, MDataBlock &dataBlock)
 
     // apply poses
     for (auto &item : joints)
-    {
-        MMatrix m = item.second.baseMatrix;
-        MVector scale = mscale(m);
-
-        set_mscale(m, MVector(1, 1, 1));  // reset scale
+    {       
+        MVector translation = taxis(item.second.baseMatrix);
+        MQuaternion rotation = mat2quat(item.second.baseMatrix);
+        MVector scale = mscale(item.second.baseMatrix);
 
         for (const auto& p : item.second.poses)
         {
@@ -201,13 +169,15 @@ MStatus Skeleposer::compute(const MPlug &plug, MDataBlock &dataBlock)
 
                 if (p.blendMode == PoseBlendMode::ADDIVITE)
                 {
-                    m = blendMatrices(m, delta * m, p.weight);
+                    translation += taxis(delta) * p.weight;
+                    rotation = slerp(rotation, mat2quat(delta) * rotation, p.weight);
                     scale = vectorLerp(scale, vectorMult(deltaScale, scale), p.weight);
                 }
-
+                
                 else if (p.blendMode == PoseBlendMode::REPLACE)
                 {
-                    m = blendMatrices(m, delta, p.weight);
+                    translation = vectorLerp(translation, taxis(delta), p.weight);
+                    rotation = slerp(rotation, mat2quat(delta), p.weight);
                     scale = vectorLerp(scale, deltaScale, p.weight);
                 }
             }
@@ -219,9 +189,9 @@ MStatus Skeleposer::compute(const MPlug &plug, MDataBlock &dataBlock)
         auto rHandle = outputRotatesBuilder.addElement(idx);
         auto sHandle = outputScalesBuilder.addElement(idx);
         
-        const MEulerRotation euler = mat2quat(m * item.second.jointOrient.inverse()).asEulerRotation();
+        const MEulerRotation euler = mat2quat(rotation * item.second.jointOrient.inverse()).asEulerRotation();
 
-        tHandle.setMVector(taxis(m));
+        tHandle.setMVector(translation);
 
         rHandle.child(attr_outputRotateX).setMAngle(MAngle(euler.x));
         rHandle.child(attr_outputRotateY).setMAngle(MAngle(euler.y));

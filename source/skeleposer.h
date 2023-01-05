@@ -4,6 +4,7 @@
 
 #include <maya/MPxNode.h>
 #include <maya/MMatrix.h>
+#include <maya/MQuaternion.h>
 
 using namespace std;
 
@@ -73,7 +74,7 @@ struct Pose
 struct Joint
 {
 	MMatrix baseMatrix;
-	MMatrix jointOrient;
+	MQuaternion jointOrient;
 	vector<Pose> poses;	
 };
 

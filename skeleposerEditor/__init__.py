@@ -15,60 +15,59 @@ mayaMainWindow = wrapInstance(long(api.MQtUtil.mainWindow()), QMainWindow)
 
 RootDirectory = os.path.dirname(__file__).decode("windows-1251")
 
+def shortenValue(v, epsilon=0.00001):
+    return 0 if abs(v) < epsilon else v
+
+def set_matrixRC(m, r, c, v):
+    api.MScriptUtil.setDoubleArray( m[r], c, v)
+
+def set_maxis(m, a, v):
+    set_matrixRC(m, a, 0, v.x)
+    set_matrixRC(m, a, 1, v.y)
+    set_matrixRC(m, a, 2, v.z)
+
+def maxis(m, a):
+    return api.MVector(m(a,0), m(a,1), m(a,2))
+
 def getLocalMatrix(joint):
     '''
     Get joint local matrix: t, r*jo, s
     '''
+    q = api.MQuaternion(joint.getRotation().asQuaternion())
     if isinstance(joint, pm.nt.Joint):
-        q = joint.getRotation().asQuaternion() * joint.getOrientation() # second one applies first for quats
-    else: # transform
-        q = joint.getRotation().asQuaternion()
+        q *= api.MQuaternion(joint.getOrientation()) # second one applies first for quats
 
     qm = q.asMatrix()
 
-    sm = pm.dt.Matrix()
-    sm.a00 = joint.sx.get()
-    sm.a11 = joint.sy.get()
-    sm.a22 = joint.sz.get()
+    sm = api.MMatrix()
+    set_matrixRC(sm, 0, 0, pm.getAttr(joint+".sx"))
+    set_matrixRC(sm, 1, 1, pm.getAttr(joint+".sy"))
+    set_matrixRC(sm, 2, 2, pm.getAttr(joint+".sz"))
 
     m = sm * qm
+    set_matrixRC(m, 3, 0, pm.getAttr(joint+".tx"))
+    set_matrixRC(m, 3, 1, pm.getAttr(joint+".ty"))
+    set_matrixRC(m, 3, 2, pm.getAttr(joint+".tz"))
 
-    m.a30 = joint.tx.get()
-    m.a31 = joint.ty.get()
-    m.a32 = joint.tz.get()
-
-    return m
+    return pm.dt.Matrix(m)
 
 def matrixScale(m):
-    xaxis = pm.dt.Vector(m.a00,m.a01,m.a02)
-    yaxis = pm.dt.Vector(m.a10,m.a11,m.a12)
-    zaxis = pm.dt.Vector(m.a20,m.a21,m.a22)
-    return pm.dt.Vector(xaxis.length(), yaxis.length(), zaxis.length())
+    m = api.MMatrix(m)
+    return pm.dt.Vector(maxis(m, 0).length(), maxis(m, 1).length(), maxis(m, 2).length())
 
 def scaledMatrix(m, scale=pm.dt.Vector(1,1,1)):
-    out = pm.dt.Matrix()
+    m = api.MMatrix(m)
+    out = api.MMatrix()
 
-    xaxis = pm.dt.Vector(m.a00,m.a01,m.a02).normal() * scale.x
-    yaxis = pm.dt.Vector(m.a10,m.a11,m.a12).normal() * scale.y
-    zaxis = pm.dt.Vector(m.a20,m.a21,m.a22).normal() * scale.z
+    xaxis = pm.dt.Vector(m(0,0), m(0,1), m(0,2)).normal() * scale.x
+    yaxis = pm.dt.Vector(m(1,0), m(1,1), m(1,2)).normal() * scale.y
+    zaxis = pm.dt.Vector(m(2,0), m(2,1), m(2,2)).normal() * scale.z
 
-    out.a00 = xaxis.x
-    out.a01 = xaxis.y
-    out.a02 = xaxis.z
-
-    out.a10 = yaxis.x
-    out.a11 = yaxis.y
-    out.a12 = yaxis.z
-
-    out.a20 = zaxis.x
-    out.a21 = zaxis.y
-    out.a22 = zaxis.z
-
-    out.a30 = m.a30
-    out.a31 = m.a31
-    out.a32 = m.a32
-
-    return out
+    set_maxis(out, 0, xaxis)
+    set_maxis(out, 1, yaxis)
+    set_maxis(out, 2, zaxis)
+    set_maxis(out, 3, maxis(m, 3))
+    return pm.dt.Matrix(out)
 
 def slerp(q1, q2, w):
     q = om.MQuaternion.slerp(om.MQuaternion(q1.x, q1.y, q1.z, q1.w),
@@ -76,53 +75,58 @@ def slerp(q1, q2, w):
     return pm.dt.Quaternion(q.x, q.y, q.z, q.w)
 
 def blendMatrices(m1, m2, w):
-    q1 = pm.dt.TransformationMatrix(scaledMatrix(m1)).getRotation().asQuaternion()
-    q2 = pm.dt.TransformationMatrix(scaledMatrix(m2)).getRotation().asQuaternion()
+    m1 = api.MMatrix(m1)
+    m2 = api.MMatrix(m2)
+
+    q1 = api.MTransformationMatrix(scaledMatrix(m1)).rotation()
+    q2 = api.MTransformationMatrix(scaledMatrix(m2)).rotation()
 
     s = matrixScale(m1) * (1-w) + matrixScale(m2) * w
-    m = scaledMatrix(slerp(q1, q2, w).asMatrix(), s)
+    m = api.MMatrix(scaledMatrix(slerp(q1, q2, w).asMatrix(), s))
 
-    m.a30 = m1.a30 * (1-w) + m2.a30 * w
-    m.a31 = m1.a31 * (1-w) + m2.a31 * w
-    m.a32 = m1.a32 * (1-w) + m2.a32 * w
-    return m
+    set_maxis(m, 3, maxis(m1, 3)*(1-w) + maxis(m2, 3)*w)
+    return pm.dt.Matrix(m)
 
 def symmat(m):
-    out = pm.dt.Matrix(m)
-    out.a00 *= -1
-    out.a10 *= -1
-    out.a20 *= -1
-    out.a30 *= -1
-    return out
+    out = api.MMatrix(m)
+    set_matrixRC(out, 0, 0, -1 * out(0,0))
+    set_matrixRC(out, 1, 0, -1 * out(1,0))
+    set_matrixRC(out, 2, 0, -1 * out(2,0))
+    set_matrixRC(out, 3, 0, -1 * out(3,0))
+    return pm.dt.Matrix(out)
 
 def getDelta(mat, baseMat, parentMat, blendMode): # get delta matrix from pose world matrix
+    mat = api.MMatrix(mat)
+    baseMat = api.MMatrix(baseMat)
+    parentMat = api.MMatrix(parentMat)
+
     if blendMode == 0:
-        offset = pm.dt.Vector(mat.a30 - baseMat.a30, mat.a31 - baseMat.a31, mat.a32 - baseMat.a32)
+        offset = maxis(mat, 3) - maxis(baseMat, 3)
         offset *= parentMat.inverse()
-        
+
         m = mat * baseMat.inverse()
-        m.a30 = offset.x
-        m.a31 = offset.y
-        m.a32 = offset.z
+        set_maxis(m, 3, offset)
 
     elif blendMode == 1:
         m = mat * parentMat.inverse()
 
-    return m     
+    return pm.dt.Matrix(m)
 
 def applyDelta(delta, baseMat, parentMat, blendMode): # apply delta and get pose world matrix
+    delta = api.MMatrix(delta)
+    baseMat = api.MMatrix(baseMat)
+    parentMat = api.MMatrix(parentMat)
+
     if blendMode == 0:
-        offset = pm.dt.Vector(delta.a30, delta.a31, delta.a32) * parentMat    
-        
-        m = pm.dt.Matrix(delta * baseMat)
-        m.a30 = baseMat.a30 + offset.x
-        m.a31 = baseMat.a31 + offset.y
-        m.a32 = baseMat.a32 + offset.z
+        offset = maxis(delta,3) * parentMat
+
+        m = delta * baseMat
+        set_maxis(m, 3, maxis(baseMat, 3) + offset)
 
     elif blendMode == 1:
         m = delta * parentMat
 
-    return m
+    return pm.dt.Matrix(m)
 
 def parentConstraintMatrix(srcBase, src, destBase):
     return destBase * srcBase.inverse() * src
@@ -137,13 +141,14 @@ def dagPose_getWorldMatrix(dagPose, j):
     idx = dagPose_findIndex(dagPose, j)
     if idx is not None:
         return dagPose.worldMatrix[idx].get()
-                
+
 def dagPose_getParentMatrix(dagPose, j):
     idx = dagPose_findIndex(dagPose, j)
     if idx is not None:
         parent = dagPose.parents[idx].inputs(p=True, sh=True)
         if parent and parent[0] != dagPose.world:
             return dagPose.worldMatrix[parent[0].index()].get()
+    return pm.dt.Matrix()
 
 def getRemapInputPlug(remap):
     inputs = remap.inputValue.inputs(p=True)
@@ -191,7 +196,7 @@ class Skeleposer(object):
             self.node = pm.PyNode(node)
             self.removeEmptyJoints()
         else:
-            self.node = pm.createNode("skeleposer")
+            self.node = pm.createNode("skeleposer", n=node)
 
         self.addInternalAttributes()
 
@@ -483,7 +488,7 @@ class Skeleposer(object):
 
         destPose = self.node.poses[toIndex]
         destPose.poseBlendMode.set(srcBlendMode)
-        
+
         for mattr in srcPose.poseDeltaMatrices:
             if mattr.index() in indices:
                 destPose.poseDeltaMatrices[mattr.index()].set(mattr.get())
@@ -575,7 +580,7 @@ class Skeleposer(object):
             bmat = dagPose_getWorldMatrix(dagPose, j)
             pmat = dagPose_getParentMatrix(dagPose, j)
             wm = applyDelta(delta, bmat, pmat, poseBlend)
-            pose.poseDeltaMatrices[idx].set(getDelta(wm, bmat, pmat, blend))  
+            pose.poseDeltaMatrices[idx].set(getDelta(wm, bmat, pmat, blend))
 
         pose.poseBlendMode.set(blend)
 
@@ -692,18 +697,56 @@ class Skeleposer(object):
                 data["children"].append(self.getDirectoryData(-chIdx))
         return data
 
+    def addSplitPose(self, srcPoseName, destPoseName, **kwargs): # addSplitPose("brows_up", "L_brow_up_inner", R_=0, M_=0.5, L_brow_2=0.3, L_brow_3=0, L_brow_4=0)
+        srcPose = None
+        destPose = None
+        for p in self.node.poses:
+            if p.poseName.get() == srcPoseName:
+                srcPose = p
+
+            if p.poseName.get() == destPoseName:
+                destPose = p
+
+        if not srcPose:
+            pm.warning("Cannot find source pose: "+srcPoseName)
+            return
+
+        if not destPose:
+            idx = self.makePose(destPoseName)
+            destPose = self.node.poses[idx]
+
+        self.copyPose(srcPose.index(), destPose.index())
+
+        for j in self.getPoseJoints(destPose.index()):
+            j_idx = self.getJointIndex(j)
+            bm = self.node.baseMatrices[j_idx].get()
+
+            for pattern in kwargs:
+                if re.search(pattern, j.name()):
+                    w = kwargs[pattern]
+                    pdm = destPose.poseDeltaMatrices[j_idx]
+                    pdm.set( blendMatrices(pm.dt.Matrix(), pdm.get(), w) )
+
     def toJson(self):
         data = {"joints":{}, "baseMatrices":{}, "poses": {}, "directories": {}}
 
-        for j in self.getJoints():
-            idx = self.getJointIndex(j)
-            data["joints"][idx] = j.name()
+        for j in self.node.joints:
+            inputs = j.inputs()
+            if inputs:
+                data["joints"][j.index()] = inputs[0].name()
 
         for bm in self.node.baseMatrices:
-            data["baseMatrices"][bm.index()] = bm.get().tolist()
+            a = "{}.baseMatrices[{}]".format(self.node, bm.index())
+            data["baseMatrices"][bm.index()] = [shortenValue(v) for v in cmds.getAttr(a)]
 
         for d in self.node.directories:
-            data["directories"][d.index()] = d.get()
+            data["directories"][d.index()] = {}
+            directoryData = data["directories"][d.index()]
+
+            directoryData["directoryName"] = d.directoryName.get() or ""
+            directoryData["directoryWeight"] = d.directoryWeight.get()
+            directoryData["directoryParentIndex"] = d.directoryParentIndex.get()
+            directoryData["directoryChildrenIndices"] = d.directoryChildrenIndices.get()
 
         for p in self.node.poses:
             data["poses"][p.index()] = {}
@@ -713,10 +756,16 @@ class Skeleposer(object):
             poseData["poseWeight"] = p.poseWeight.get()
             poseData["poseDirectoryIndex"] = p.poseDirectoryIndex.get()
             poseData["poseBlendMode"] = p.poseBlendMode.get()
+
+            poseWeightInputs = p.poseWeight.inputs(type="combinationShape")
+            if poseWeightInputs:
+                poseData["corrects"] = [iw.getParent().index() for iw in poseWeightInputs[0].inputWeight.inputs(p=True) if iw.getParent()]
+
             poseData["poseDeltaMatrices"] = {}
 
             for m in p.poseDeltaMatrices:
-                poseData["poseDeltaMatrices"][m.index()] = m.get().tolist()
+                a = "{}.poses[{}].poseDeltaMatrices[{}]".format(self.node, p.index(), m.index())
+                poseData["poseDeltaMatrices"][m.index()] = [shortenValue(v) for v in cmds.getAttr(a)]
 
         return data
 
@@ -733,14 +782,15 @@ class Skeleposer(object):
                 pm.warning("fromJson: cannot find "+j)
 
         for idx, m in data["baseMatrices"].items():
-            self.node.baseMatrices[idx].set(pm.dt.Matrix(m))
+            a = "{}.baseMatrices[{}]".format(self.node, idx)
+            cmds.setAttr(a, m, type="matrix")
 
         for idx, d in data["directories"].items():
             a = self.node.directories[idx]
-            a.directoryName.set(str(d[0]))
-            a.directoryWeight.set(d[1])
-            a.directoryParentIndex.set(d[2])
-            a.directoryChildrenIndices.set(d[3], type="Int32Array")
+            a.directoryName.set(str(d["directoryName"]))
+            a.directoryWeight.set(d["directoryWeight"])
+            a.directoryParentIndex.set(d["directoryParentIndex"])
+            a.directoryChildrenIndices.set(d["directoryChildrenIndices"], type="Int32Array")
 
         for idx, p in data["poses"].items():
             a = self.node.poses[idx]
@@ -750,9 +800,142 @@ class Skeleposer(object):
             a.poseBlendMode.set(p["poseBlendMode"])
 
             for m_idx, m in p["poseDeltaMatrices"].items():
-                a.poseDeltaMatrices[m_idx].set(pm.dt.Matrix(m))     
+                a = "{}.poses[{}].poseDeltaMatrices[{}]".format(self.node, idx, m_idx)
+                cmds.setAttr(a, m, type="matrix")
+
+            if "corrects" in p: # when corrects found
+                self.makeCorrectNode(idx, p["corrects"])
+
+    def getWorldPoses(self, joints=None):
+        self.node.directories[0].directoryWeight.set(0)
+
+        dagPose = self.dagPose()
+
+        poses = {}
+        for pose in self.node.poses:
+            blendMode = pose.poseBlendMode.get()
+
+            poses[pose.index()] = {}
+            for delta in pose.poseDeltaMatrices:
+                j = self.getJointByIndex(delta.index())
+
+                if not joints or j in joints or j.name() in joints:
+                    bmat = dagPose_getWorldMatrix(dagPose, j)
+                    pmat = dagPose_getParentMatrix(dagPose, j)
+                    poses[pose.index()][delta.index()] = applyDelta(delta.get(), bmat, pmat, blendMode)
+
+        self.node.directories[0].directoryWeight.set(1)
+        return poses
+
+    def setWorldPoses(self, poses):
+        for pi in poses:
+            blendMode = self.node.poses[pi].poseBlendMode.get()
+
+            for di in poses[pi]:
+                j = self.getJointByIndex(di)
+                bmat = dagPose_getWorldMatrix(dagPose, j)
+                pmat = dagPose_getParentMatrix(dagPose, j)
+                self.node.poses[pi].poseDeltaMatrices[di].set(getDelta(poses[pi][di], bmat, pmat, blendMode))
 
 ####################################################################################
+def findTargetIndexByName(blend, name):
+    for aw in blend.w:
+        if pm.aliasAttr(aw, q=True)==name:
+            return aw.index()
+
+def findAvailableTargetIndex(blend):
+    idx = 0
+    while blend.w[idx].exists():
+        idx += 1
+    return idx
+
+def addSplitBlends(mesh, blendShape, targetName, skel, poses, initialWeightsOnly=False):
+    skel = skel if isinstance(skel, Skeleposer) else Skeleposer(skel)
+    mesh = pm.PyNode(mesh)
+    blendShape = pm.PyNode(blendShape)
+
+    blendShape.envelope.set(0)
+
+    basePoints = api.MPointArray()
+    meshFn = api.MFnMesh(mesh.__apimdagpath__())
+    meshFn.getPoints(basePoints)
+
+    offsetsList = []
+    for poseName in poses:
+        poseIndex = skel.findPoseIndexByName(poseName)
+        if poseIndex is not None:
+            pose = skel.node.poses[poseIndex]
+
+            inputs = pose.poseWeight.inputs(p=True)
+            if inputs:
+                pm.disconnectAttr(inputs[0], pose.poseWeight)
+
+            pose.poseWeight.set(1)
+
+            points = api.MPointArray()
+            meshFn.getPoints(points)
+
+            offsets = [0]*points.length()
+            for i in range(points.length()):
+                offsets[i] = (points[i] - basePoints[i]).length()
+
+            if inputs:
+                inputs[0] >> pose.poseWeight
+            else:
+                pose.poseWeight.set(0)
+
+            offsetsList.append(offsets)
+
+    blendShape.envelope.set(1)
+
+    targetIndex = findTargetIndexByName(blendShape, targetName)
+    targetGeo = pm.PyNode(pm.sculptTarget(blendShape, e=True, regenerate=True, target=targetIndex)[0])
+
+    targetDeltas = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputPointsTarget.get()
+    targetComponents = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputComponentsTarget.get()
+
+    poseTargetIndices = []
+    updateWeightsFor = []
+    for poseName in poses:
+        blendPoseName = targetName+"_"+poseName
+        idx = findTargetIndexByName(blendShape, blendPoseName)
+        if idx is None:
+            idx = findAvailableTargetIndex(blendShape)
+            tmp = pm.duplicate(targetGeo)[0]
+            tmp.rename(blendPoseName)
+            cmds.blendShape(blendShape.name(), e=True, t=[mesh.name(), idx, tmp.name(), 1])
+            pm.delete(tmp)
+
+            updateWeightsFor.append(idx)
+
+        elif not initialWeightsOnly:
+            updateWeightsFor.append(idx)
+
+        blendShape.inputTarget[0].inputTargetGroup[idx].inputTargetItem[6000].inputPointsTarget.set(len(targetDeltas), *targetDeltas, type="pointArray")
+        blendShape.inputTarget[0].inputTargetGroup[idx].inputTargetItem[6000].inputComponentsTarget.set(len(targetComponents), *targetComponents, type="componentList")
+
+        poseIndex = skel.findPoseIndexByName(poseName)
+        if poseIndex is not None:
+            skel.node.poses[poseIndex].poseWeight >> blendShape.w[idx]
+
+        poseTargetIndices.append(idx)
+
+    pm.delete(targetGeo)
+
+    for i in range(mesh.numVertices()):
+        summa = 0
+        for k in range(len(poses)):
+            summa += offsetsList[k][i]**2
+
+        for k in range(len(poses)):
+            if k not in updateWeightsFor:
+                continue
+
+            if summa > 0.001:
+                w = offsetsList[k][i]**2 / summa
+                cmds.setAttr("{}.inputTarget[0].inputTargetGroup[{}].targetWeights[{}]".format(blendShape, poseTargetIndices[k], i), w)
+            else:
+                cmds.setAttr("{}.inputTarget[0].inputTargetGroup[{}].targetWeights[{}]".format(blendShape, poseTargetIndices[k], i), 0)
 
 @undoBlock
 def editButtonClicked(btn, item):
@@ -794,7 +977,7 @@ def setItemWidgets(item):
             setItemWidgets(ch)
 
     elif item.poseIndex is not None:
-        attrWidget = pm.attrFieldSliderGrp(at=skel.node.poses[item.poseIndex].poseWeight,min=0, max=1, l="", pre=2, cw3=[0,40,100])
+        attrWidget = pm.attrFieldSliderGrp(at=skel.node.poses[item.poseIndex].poseWeight,min=0, max=2, smn=0, smx=1, l="", pre=2, cw3=[0,40,100])
         w = attrWidget.asQtObject()
 
         for ch in w.children():
@@ -944,27 +1127,27 @@ class ChangeButtonWidget(QWidget):
 
 class SearchReplaceWindow(QDialog):
     replaceClicked = Signal(str, str)
-    
+
     def __init__(self, **kwargs):
         super(SearchReplaceWindow, self).__init__(**kwargs)
         self.setWindowTitle("Search/Replace")
         layout = QGridLayout()
         layout.setDefaultPositioning(2, Qt.Horizontal)
         self.setLayout(layout)
-        
+
         self.searchWidget = QLineEdit("L_")
         self.replaceWidget = QLineEdit("R_")
-        
+
         btn = QPushButton("Replace")
         btn.clicked.connect(self.btnClicked)
-        
+
         layout.addWidget(QLabel("Search"))
         layout.addWidget(self.searchWidget)
         layout.addWidget(QLabel("Replace"))
-        layout.addWidget(self.replaceWidget)   
+        layout.addWidget(self.replaceWidget)
         layout.addWidget(QLabel(""))
         layout.addWidget(btn)
-        
+
     def btnClicked(self):
         self.replaceClicked.emit(self.searchWidget.text(), self.replaceWidget.text())
         self.accept()
@@ -1189,7 +1372,7 @@ class TreeWidget(QTreeWidget):
 
     def searchAndReplace(self, searchText, replaceText):
         for sel in self.selectedItems():
-            sel.setText(0, sel.text(0).replace(searchText, replaceText))        
+            sel.setText(0, sel.text(0).replace(searchText, replaceText))
 
     @undoBlock
     def addInbetweenPose(self):
@@ -1309,7 +1492,7 @@ class TreeWidget(QTreeWidget):
     @undoBlock
     def removeItems(self):
         ok = QMessageBox.question(self, "Skeleposer Editor", "Really remove?", QMessageBox.Yes and QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
-        if ok:        
+        if ok:
             for item in self.selectedItems():
                 if item.directoryIndex is not None: # remove directory
                     skel.removeDirectory(item.directoryIndex)
@@ -1408,10 +1591,10 @@ class SkeleposerSelectorWidget(QLineEdit):
             super(SkeleposerSelectorWidget, self).mouseDoubleClickEvent(event)
 
 class BlendSliderWidget(QWidget):
+    valueChanged = Signal(float)
+
     def __init__(self, **kwargs):
         super(BlendSliderWidget, self).__init__(**kwargs)
-
-        self.matrices = {}
 
         layout = QHBoxLayout()
         layout.setMargin(0)
@@ -1436,19 +1619,12 @@ class BlendSliderWidget(QWidget):
     def textChanged(self):
         value = float(self.textWidget.text())
         self.sliderWidget.setValue(value*100)
-        self.valueChanged(value)
+        self.valueChanged.emit(value)
 
     def sliderValueChanged(self):
         value = self.sliderWidget.value()/100.0
         self.textWidget.setText(str(value))
-        self.valueChanged(value)
-
-    @undoBlock
-    def valueChanged(self, v):        
-        for j in pm.ls(sl=True, type="transform"):
-            data = self.matrices.get(j.name())
-            if data:
-                j.setMatrix(blendMatrices(data["baseMatrix"], data["matrix"], v))
+        self.valueChanged.emit(value)
 
 class ToolsWidget(QWidget):
     def __init__(self, **kwargs):
@@ -1471,19 +1647,25 @@ class ToolsWidget(QWidget):
         resetJointsBtn.setIcon(QIcon(RootDirectory+"/icons/reset.png"))
 
         self.blendSliderWidget = BlendSliderWidget()
+        self.blendSliderWidget.valueChanged.connect(self.blendValueChanged)
 
         layout.addWidget(mirrorJointsBtn)
         layout.addWidget(resetJointsBtn)
         layout.addWidget(self.blendSliderWidget)
         layout.addStretch()
 
-    def showEvent(self, event):
-        self.blendSliderWidget.matrices = {}
-        for j in skel.getJoints():
-            data = {"matrix": getLocalMatrix(j),
-                    "baseMatrix":  skel.node.baseMatrices[skel.getJointIndex(j)].get()}
+    @undoBlock
+    def blendValueChanged(self, v):
+        for j in pm.ls(sl=True, type="transform"):
+            if j in self.matrices:
+                bm, m = self.matrices[j]
+                j.setMatrix(blendMatrices(bm, m, v))
 
-            self.blendSliderWidget.matrices[j.name()] = data
+    def showEvent(self, event):
+        self.matrices = {}
+        poseIndex = skel._editPoseData["poseIndex"]
+        for j in skel.getPoseJoints(poseIndex):
+            self.matrices[j] = (skel.node.baseMatrices[skel.getJointIndex(j)].get(), getLocalMatrix(j))
 
     def mirrorJoints(self):
         dagPose = skel.dagPose()
