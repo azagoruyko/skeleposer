@@ -6,6 +6,8 @@ Briefly, it's like Shape Editor in Maya, but works with transforms and joints. I
 
 ![skeleposer](https://user-images.githubusercontent.com/9614751/159117355-97a65688-4baf-4f32-99bb-5f8c5d48d9cf.png)
 
+Youtube: https://www.youtube.com/watch?v=yBulcW3-WS4
+
 ## Basic workflow
 
 1. **Create skeleposer node**.<br>
@@ -20,8 +22,6 @@ Briefly, it's like Shape Editor in Maya, but works with transforms and joints. I
   
 6. **Connect controls to the poses using drivers**.<br>
   This is a convenient way of connecting controls to poses.
-
-![skeleposer](https://user-images.githubusercontent.com/9614751/159117978-d545a408-84db-451a-b8e4-73765b5ef404.gif)
 
 ## Features
 Skeleposer supports a lot of cool features that make the working process nice:
@@ -71,9 +71,8 @@ skeleposerEditor.skeleposerWindow.show()
 ## Additional nodes
 There are some other nodes provided by the plugin. 
 * **stickyMatrix**.<br>
-  This node is used to make "sticky rig" for two indepdendant transforms. It's useful for eye blink, sticky lips (zip) and other stuff.<br>
-  Use `stickyMatrix` module in Rig Builder as a reference: https://github.com/azagoruyko/rigBuilder/blob/main/modules/Tools/StickyMatrix.xml
-
+  This node is used to make "sticky rig" for two independent transforms. It's useful for eye blink, sticky lips (zip) and other stuff.<br>
+  
 ## Unreal Engine Plugin
 
 ![skel](https://user-images.githubusercontent.com/9614751/211027037-a869ba58-f1bd-4b78-8d97-8d11f77689ca.PNG)
