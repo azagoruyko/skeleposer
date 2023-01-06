@@ -12,7 +12,7 @@ struct DirectoryItem
 {
     float weight;
     int parentIndex;
-	vector<int> childrenIndices; // positive - poses, negative - directories
+    vector<int> childrenIndices; // positive - poses, negative - directories
 };
 
 class Directory
@@ -58,11 +58,11 @@ private:
 	map<int, DirectoryItem> _items;
 };
 
-typedef enum PoseBlendMode
+typedef enum
 {
 	ADDIVITE,
 	REPLACE
-};
+} PoseBlendMode;
 
 struct Pose
 {

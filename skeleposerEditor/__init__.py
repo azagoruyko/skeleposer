@@ -11,9 +11,9 @@ import os
 import json
 
 from shiboken2 import wrapInstance
-mayaMainWindow = wrapInstance(long(api.MQtUtil.mainWindow()), QMainWindow)
+mayaMainWindow = wrapInstance(int(api.MQtUtil.mainWindow()), QMainWindow)
 
-RootDirectory = os.path.dirname(__file__).decode("windows-1251")
+RootDirectory = os.path.dirname(__file__)
 
 def shortenValue(v, epsilon=0.00001):
     return 0 if abs(v) < epsilon else v
@@ -282,6 +282,7 @@ class Skeleposer(object):
 
     def makeCorrectNode(self, drivenIndex, driverIndexList):
         c = pm.createNode("combinationShape", n=self.node.name()+"_"+str(drivenIndex)+"_combinationShape")
+        c.combinationMethod.set(1) # lowest weighting
         for i, idx in enumerate(driverIndexList):
             self.node.poses[idx].poseWeight >> c.inputWeight[i]
         c.outputWeight >> self.node.poses[drivenIndex].poseWeight

@@ -28,8 +28,6 @@ set(source
     source/main.cpp 
     source/skeleposer.cpp
     source/skeleposer.h
-    source/blendMatrix.cpp
-    source/blendMatrix.h
     source/stickyMatrix.cpp
     source/stickyMatrix.h
     source/utils.hpp)
