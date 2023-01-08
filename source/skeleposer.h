@@ -92,6 +92,7 @@ public:
 	static MObject attr_poses;
 	static MObject attr_poseName;
 	static MObject attr_poseWeight;
+	static MObject attr_poseEnabled;
 	static MObject attr_poseBlendMode;
 	static MObject attr_poseDirectoryIndex;
 	static MObject attr_poseDeltaMatrices;

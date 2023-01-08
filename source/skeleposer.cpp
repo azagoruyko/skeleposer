@@ -39,6 +39,7 @@ MObject Skeleposer::attr_jointOrients;
 MObject Skeleposer::attr_poses;
 MObject Skeleposer::attr_poseName;
 MObject Skeleposer::attr_poseWeight;
+MObject Skeleposer::attr_poseEnabled;
 MObject Skeleposer::attr_poseBlendMode;
 MObject Skeleposer::attr_poseDirectoryIndex;
 MObject Skeleposer::attr_poseDeltaMatrices;
@@ -122,12 +123,14 @@ MStatus Skeleposer::compute(const MPlug &plug, MDataBlock &dataBlock)
 
         const int poseDirectoryIndex = posesHandle.inputValue().child(attr_poseDirectoryIndex).asInt();
 
+        const bool poseEnabled = posesHandle.inputValue().child(attr_poseEnabled).asBool();
+
         const float poseWeight = posesHandle.inputValue().child(attr_poseWeight).asFloat();
         const short poseBlendMode = posesHandle.inputValue().child(attr_poseBlendMode).asShort();
         const float directoryWeight = directory.getRecursiveWeight(poseDirectoryIndex);
         const float fullPoseWeight = poseWeight * directoryWeight;
 
-        if (fullPoseWeight > EPSILON)
+        if (fullPoseWeight > EPSILON && poseEnabled)
         {
             MArrayDataHandle poseDeltaMatrices(posesHandle.outputValue().child(attr_poseDeltaMatrices));
             for (int k = 0; k < poseDeltaMatrices.elementCount(); k++)
@@ -252,6 +255,8 @@ MStatus Skeleposer::initialize()
     nAttr.setMin(0);
     nAttr.setMax(1);
     nAttr.setKeyable(true);
+    
+    attr_poseEnabled = nAttr.create("poseEnabled", "poseEnabled", MFnNumericData::kBoolean, true);
 
     attr_poseBlendMode = eAttr.create("poseBlendMode", "poseBlendMode", 0);
     eAttr.addField("Additive", 0);
@@ -268,6 +273,7 @@ MStatus Skeleposer::initialize()
     attr_poses = cAttr.create("poses", "poses");
     cAttr.addChild(attr_poseName);
     cAttr.addChild(attr_poseWeight);
+    cAttr.addChild(attr_poseEnabled);
     cAttr.addChild(attr_poseDirectoryIndex);
     cAttr.addChild(attr_poseBlendMode);
     cAttr.addChild(attr_poseDeltaMatrices);

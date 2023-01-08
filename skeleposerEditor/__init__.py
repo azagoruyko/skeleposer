@@ -629,20 +629,12 @@ class Skeleposer(object):
 
         self._editPoseData = {"joints":{}, "poseIndex":idx}
 
-        w = self.node.poses[idx].poseWeight.get()
-        wInputs = self.node.poses[idx].poseWeight.inputs(p=True)
-        if wInputs:
-            pm.disconnectAttr(wInputs[0], self.node.poses[idx].poseWeight)
-        self.node.poses[idx].poseWeight.set(0)
+        self.node.poses[idx].poseEnabled.set(False) # disable pose
 
-        for ja in self.node.joints:
-            j = ja.inputs()[0]
+        for j in self.getJoints():
             self._editPoseData["joints"][j.name()] = getLocalMatrix(j)
-
-        if wInputs:
-            wInputs[0] >> self.node.poses[idx].poseWeight
-        else:
-            self.node.poses[idx].poseWeight.set(w)
+            
+        self.node.poses[idx].poseEnabled.set(True) # enable pose
 
         self.disconnectOutputs()
 
@@ -653,13 +645,13 @@ class Skeleposer(object):
 
         pose = self.node.poses[self._editPoseData["poseIndex"]]
 
-        for ja in self.node.joints:
-            j = ja.inputs()[0]
+        for j in self.getJoints():
+            jointIndex = self.getJointIndex(j)
 
             if self.checkIfApplyCorrect():
                 baseMatrix = self._editPoseData["joints"][j.name()]
             else:
-                baseMatrix = self.node.baseMatrices[ja.index()].get()
+                baseMatrix = self.node.baseMatrices[jointIndex].get()
 
             jmat = getLocalMatrix(j)
             if not jmat.isEquivalent(baseMatrix, 1e-4):
@@ -672,13 +664,13 @@ class Skeleposer(object):
                     baseMatrix_scale = matrixScale(baseMatrix)
                     m_scale = pm.dt.Vector(j_scale.x / baseMatrix_scale.x, j_scale.y / baseMatrix_scale.y, j_scale.z / baseMatrix_scale.z)
 
-                    pose.poseDeltaMatrices[ja.index()].set(scaledMatrix(m, m_scale))
+                    pose.poseDeltaMatrices[jointIndex].set(scaledMatrix(m, m_scale))
 
                 elif poseBlendMode == 1: # replace
-                    pose.poseDeltaMatrices[ja.index()].set(jmat)
+                    pose.poseDeltaMatrices[jointIndex].set(jmat)
 
             else:
-                pm.removeMultiInstance(pose.poseDeltaMatrices[ja.index()], b=True)
+                pm.removeMultiInstance(pose.poseDeltaMatrices[jointIndex], b=True)
 
         self.reconnectOutputs()
         self._editPoseData = {}
