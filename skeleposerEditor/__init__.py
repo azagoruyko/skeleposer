@@ -974,9 +974,6 @@ def setItemWidgets(item):
 
         tw.setItemWidget(item, 1, w)
 
-        for ch in getAllChildren(item):
-            setItemWidgets(ch)
-
     elif item.poseIndex is not None:
         attrWidget = pm.attrFieldSliderGrp(at=skel.node.poses[item.poseIndex].poseWeight,min=0, max=2, smn=0, smx=1, l="", pre=2, cw3=[0,40,100])
         w = attrWidget.asQtObject()
@@ -1066,19 +1063,6 @@ def makeDirectoryItem(directoryIndex):
 
     updateItemVisuals(item)
     return item
-
-def addItems(parentItem, data):
-    for ch in data["children"]:
-        if isinstance(ch, dict):
-            item = makeDirectoryItem(ch["directoryIndex"])
-            parentItem.addChild(item)
-            addItems(item, ch)
-
-        else:
-            item = makePoseItem(ch)
-            parentItem.addChild(item)
-
-        setItemWidgets(item)
 
 class ChangeButtonWidget(QWidget):
     def __init__(self, item, label=" ", **kwargs):
@@ -1176,9 +1160,22 @@ class TreeWidget(QTreeWidget):
 
         self.itemChanged.connect(lambda item, idx=None:self.treeItemChanged(item))
 
+    def addItemsFromSkeleposerData(self, parentItem, skelData):
+        for ch in skelData["children"]:
+            if isinstance(ch, dict):
+                item = makeDirectoryItem(ch["directoryIndex"])
+                parentItem.addChild(item)
+                self.addItemsFromSkeleposerData(item, ch)
+
+            else:
+                item = makePoseItem(ch)
+                parentItem.addChild(item)
+
+            setItemWidgets(item)
+
     def updateTree(self):
         self.clear()
-        addItems(self.invisibleRootItem(), skel.getDirectoryData())
+        self.addItemsFromSkeleposerData(self.invisibleRootItem(), skel.getDirectoryData())
 
     def keyPressEvent(self, event):
         shift = event.modifiers() & Qt.ShiftModifier
