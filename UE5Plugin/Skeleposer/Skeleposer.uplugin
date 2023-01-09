@@ -1,32 +1,35 @@
 {
-	"FileVersion": 3,
-	"Version": 1,
-	"VersionName": "1.0",
-	"FriendlyName": "Skeleposer",
-	"Description": "Skeleposer is like Shape Editor in Maya but works for skeletons",
-	"Category": "Other",
-	"CreatedBy": "Alexander Zagoruyko",
-	"CreatedByURL": "",
-	"DocsURL": "",
-	"EnabledByDefault": true,
-	"MarketplaceURL": "",
-	"SupportURL": "",
-	"CanContainContent": true,
-	"IsBetaVersion": false,
-	"IsExperimentalVersion": false,
-	"Installed": false,
-	"Modules": [
-		{
-			"Name": "Skeleposer",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		}
-	],
-
-	"Plugins": [
-		{
-			"Name": "ControlRig",
-			"Enabled": true
-		}
-	]
+    "FileVersion": 3,
+    "EngineVersion" : "4.27.0",
+    "WhitelistPlatforms": [ "Win64", "Win32", "Mac", "IOS", "Android"],
+    "Version": 1,
+    "VersionName": "1.0",
+    "FriendlyName": "Skeleposer",
+    "Description": "Skeleposer is like Shape Editor in Maya but works for skeleton",
+    "Category": "Other",
+    "CreatedBy": "Alexander Zagoruyko",
+    "CreatedByURL": "",
+    "DocsURL": "",
+    "EnabledByDefault": true,
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "CanContainContent": true,
+    "IsBetaVersion": false,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules":
+    [
+        {
+            "Name": "Skeleposer",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        }
+    ],
+    "Plugins":
+    [
+        {
+            "Name": "ControlRig",
+            "Enabled": true
+        }
+    ]
 }

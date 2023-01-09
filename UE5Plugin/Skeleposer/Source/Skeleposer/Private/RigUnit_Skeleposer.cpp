@@ -12,16 +12,11 @@
 
 #define LOCTEXT_NAMESPACE "Skeleposer"
 
-void PRINT(const FString& s)
-{
-	UE_LOG(LogTemp, Warning, TEXT("%s"), *s);
-}
-
-void DRAWTEXT(const FString& s, const FColor &Color=FColor::Yellow)
+inline void DRAW_TEXT(const FString& s, const FColor &Color=FColor::Yellow)
 {
 	if (GEngine)
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, Color, * s);
-	PRINT(s);
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, Color, *s);
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *s);
 }
 
 inline FMatrix ConvertMatrixFromMayaToUE(const FMatrix& Mat)
@@ -97,6 +92,13 @@ FRigUnit_Skeleposer_Execute()
 						PoseWeights[Pose.Name] = PoseWeight;
 					}
 
+					if (!Pose.Inbetween.Value.IsEmpty())
+					{
+						const float SourcePoseWeight = PoseWeights.FindOrAdd(Pose.Inbetween.Key, 0);
+						PoseWeight = Pose.Inbetween.Value.EvaluateFromX(SourcePoseWeight).Y;
+						PoseWeights[Pose.Name] = PoseWeight;
+					}
+
 					if (PoseWeight > 1e-3)
 					{	
 						if (Pose.BlendMode == FPoseBlendMode::ADDITIVE)
@@ -126,8 +128,6 @@ FRigUnit_Skeleposer_Execute()
 		// activate poses' morph targets
 		if (bUseMorphTargets)
 		{
-			//double start = FPlatformTime::Seconds();
-
 			for (const auto& PoseWeightItem : PoseWeights)
 			{
 				FRigElementKey CurveKey(FName(PoseWeightItem.Key), ERigElementType::Curve);
@@ -135,9 +135,6 @@ FRigUnit_Skeleposer_Execute()
 				if (Hierarchy->Find(CurveKey))
 					Hierarchy->SetCurveValue(CurveKey, PoseWeightItem.Value);
 			}
-
-			//double end = FPlatformTime::Seconds();
-			//UE_LOG(LogTemp, Warning, TEXT("code executed in %f ms"), (end - start)*1000);
 		}
 	}
 }
@@ -148,13 +145,13 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 		return;
 	FilePathCache = FilePath; // cache file path
 
-	DRAWTEXT("Read json file");
+	DRAW_TEXT("Read json file");
 
 	const FString FullFilePath = FPaths::ProjectContentDir() + "/" + FilePath;
 
 	if (!FPaths::FileExists(FullFilePath))
 	{
-		DRAWTEXT("Cannot find '" + FullFilePath + "'. Path must be relative to the project's content directory");
+		DRAW_TEXT("Cannot find '" + FullFilePath + "'. Path must be relative to the project's content directory");
 		return;
 	}
 
@@ -231,6 +228,21 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 					Pose.Corrects.Add(CorrectItem->AsNumber());
 			}
 
+			if (PoseValues.Contains("inbetween")) // idx, [(x,y), (x,y)]
+			{
+				const TArray<TSharedPtr<FJsonValue>> &InbetweenArray = PoseValues["inbetween"]->AsArray();
+
+				Pose.Inbetween.Key = InbetweenArray[0]->AsNumber(); // source pose index
+
+				for (const auto& PointItem : InbetweenArray[1]->AsArray())
+				{
+					const TArray<TSharedPtr<FJsonValue>>& PointArray = PointItem->AsArray();
+					const double X = PointArray[0]->AsNumber();
+					const double Y = PointArray[1]->AsNumber();
+					Pose.Inbetween.Value.Points.Add(FVector2D(X,Y));
+				}
+			}
+
 			for (const auto& DeltaMatricesItem : PoseValues["poseDeltaMatrices"]->AsObject()->Values)
 			{
 				const int32 BoneIdx = FCString::Atoi(*DeltaMatricesItem.Key);
@@ -274,6 +286,12 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 
 				for (int32 CorrectIdx : Pose.Corrects)
 					BonePose.Corrects.Add(PoseList[CorrectIdx].Name);
+
+				if (!Pose.Inbetween.Value.IsEmpty())
+				{
+					BonePose.Inbetween.Key = PoseList[Pose.Inbetween.Key].Name;
+					BonePose.Inbetween.Value = Pose.Inbetween.Value;
+				}
 
 				const FString& BoneName = BoneNames[DeltaItem.Key];
 				BonePoses[BoneName].Add(BonePose);

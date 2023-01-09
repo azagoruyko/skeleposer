@@ -6,6 +6,45 @@
 #include "Units/RigUnit.h"
 #include "RigUnit_Skeleposer.generated.h"
 
+/* RemapValue Maya node implemenation. Interp type is linear*/
+struct FLinearCurve
+{
+	TArray<FVector2D> Points;
+
+	FLinearCurve() {};
+	FLinearCurve(const TArray<FVector2D>& OtherPoints) : Points(OtherPoints) {}
+	FLinearCurve(const TArray<FVector2D>&& OtherPoints) { Move(Points, OtherPoints); }
+
+	bool IsEmpty() const { return Points.IsEmpty(); }
+
+	FVector2D Evaluate(float Param) const
+	{
+		const double AbsParam = (Points.Num() - 1) * Param * 0.99999;
+		const int32 Idx = floor(AbsParam);
+		const float Perc = AbsParam - Idx;
+		return FMath::Lerp(Points[Idx], Points[Idx + 1], Perc);
+	}
+
+	/* Return such a point where point.x = X */
+	FVector2D EvaluateFromX(float X) const
+	{
+		const float Step = 0.05;
+		float CurrentParam = 0;
+		FVector2D Pnt = Evaluate(0);
+		FVector2D PrevPnt(Pnt);
+
+		while (Pnt.X < X && CurrentParam < 1.0)
+		{
+			PrevPnt = Pnt;
+			CurrentParam += Step;
+			Pnt = Evaluate(FMath::Clamp(CurrentParam, 0.0, 1.0));
+		}
+
+		const float Perc = (X - PrevPnt.X) / (Pnt.X - PrevPnt.X + 1e-5);
+		return FMath::Lerp(PrevPnt, Pnt, Perc);
+	}
+};
+
 /** Each Directory contains other directories and poses as indices*/
 struct FDirectory
 {
@@ -71,6 +110,9 @@ struct FPose
 
 	/** Indices of the correct poses */
 	TArray<int32> Corrects;
+
+	/* Source pose index and an interpolation curve */	
+	TPair<int32, FLinearCurve> Inbetween;
 };
 
 /** Poses per bone. Used for perfomance reasons */
@@ -87,6 +129,9 @@ struct FBonePose
 
 	/** Correct poses names */
 	TArray<FString> Corrects;
+
+	/* Source pose name and an interpolation curve */
+	TPair<FString, FLinearCurve> Inbetween;
 };
 
 USTRUCT()

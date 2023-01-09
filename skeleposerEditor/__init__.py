@@ -309,11 +309,13 @@ class Skeleposer(object):
         for i, idx in enumerate(driverIndexList):
             self.node.poses[idx].poseWeight >> c.inputWeight[i]
         c.outputWeight >> self.node.poses[drivenIndex].poseWeight
+        return c
 
     def makeInbetweenNode(self, drivenIndex, driverIndex):
         rv = pm.createNode("remapValue", n=self.node.name()+"_"+str(drivenIndex)+"_remapValue")
         self.node.poses[driverIndex].poseWeight >> rv.inputValue
         rv.outValue >> self.node.poses[drivenIndex].poseWeight
+        return rv
 
     def addJoints(self, joints):
         for j in joints:
@@ -762,12 +764,29 @@ class Skeleposer(object):
             poseData["poseDirectoryIndex"] = p.poseDirectoryIndex.get()
             poseData["poseBlendMode"] = p.poseBlendMode.get()
 
+            # corrects
             poseWeightInputs = p.poseWeight.inputs(type="combinationShape")
             if poseWeightInputs:
-                poseData["corrects"] = [iw.getParent().index() for iw in poseWeightInputs[0].inputWeight.inputs(p=True) if iw.getParent()]
+                combinationShapeNode = poseWeightInputs[0]
+                poseData["corrects"] = [iw.getParent().index() for iw in combinationShapeNode.inputWeight.inputs(p=True) if iw.getParent()]
+
+            # inbetween
+            poseWeightInputs = p.poseWeight.inputs(type="remapValue")
+            if poseWeightInputs:
+                remapNode = poseWeightInputs[0]
+                inputValueInputs = remapNode.inputValue.inputs(p=True)
+                if inputValueInputs and inputValueInputs[0].getParent() and inputValueInputs[0].node() == self.node:
+                    sourcePoseIndex = inputValueInputs[0].getParent().index()
+
+                    points = []
+                    for va in remapNode.value:
+                        x, y, _ = va.get()
+                        points.append((x,y))                        
+                    points = sorted(points, key=lambda p: p[0]) # sort by X
+                    poseData["inbetween"] = [sourcePoseIndex, points]
 
             poseData["poseDeltaMatrices"] = {}
-
+            
             for m in p.poseDeltaMatrices:
                 a = "{}.poses[{}].poseDeltaMatrices[{}]".format(self.node, p.index(), m.index())
                 poseData["poseDeltaMatrices"][m.index()] = [shortenValue(v) for v in cmds.getAttr(a)]
@@ -810,6 +829,12 @@ class Skeleposer(object):
 
             if "corrects" in p: # when corrects found
                 self.makeCorrectNode(idx, p["corrects"])
+
+            if "inbetween" in p: # setup inbetween
+                sourcePoseIndex, points = p["inbetween"]
+                remapValue = self.makeInbetweenNode(idx, sourcePoseIndex)
+                for i, pnt in enumerate(points):
+                    remapValue.value[i].set(pnt[0], pnt[1], 1) # linear interpolation
 
     def getWorldPoses(self, joints=None):
         self.node.directories[0].directoryWeight.set(0)
@@ -1241,6 +1266,10 @@ class TreeWidget(QTreeWidget):
             weightFromSelectionAction = QAction("Weight from selection", self)
             weightFromSelectionAction.triggered.connect(lambda _=None: self.weightFromSelection())
             menu.addAction(weightFromSelectionAction)
+
+            inbetweenFromSelectionAction = QAction("Inbetween from selection", self)
+            inbetweenFromSelectionAction.triggered.connect(lambda _=None: self.inbetweenFromSelection())
+            menu.addAction(inbetweenFromSelectionAction)
             menu.addSeparator()
 
         elif len(selectedItems)==1:
@@ -1482,6 +1511,13 @@ class TreeWidget(QTreeWidget):
         if currentItem and currentItem.poseIndex is not None:
             indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None and item is not currentItem]
             skel.makeCorrectNode(currentItem.poseIndex, indices)
+
+    @undoBlock
+    def inbetweenFromSelection(self):
+        currentItem = self.currentItem()
+        if currentItem and currentItem.poseIndex is not None:
+            indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None and item is not currentItem]
+            skel.makeInbetweenNode(currentItem.poseIndex, indices[-1])
 
     @undoBlock
     def addCorrectivePose(self):
