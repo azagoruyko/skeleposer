@@ -257,6 +257,7 @@ MStatus Skeleposer::initialize()
     nAttr.setKeyable(true);
     
     attr_poseEnabled = nAttr.create("poseEnabled", "poseEnabled", MFnNumericData::kBoolean, true);
+    nAttr.setHidden(true);
 
     attr_poseBlendMode = eAttr.create("poseBlendMode", "poseBlendMode", 0);
     eAttr.addField("Additive", 0);
