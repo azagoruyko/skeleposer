@@ -15,6 +15,29 @@ mayaMainWindow = wrapInstance(int(api.MQtUtil.mainWindow()), QMainWindow)
 
 RootDirectory = os.path.dirname(__file__)
 
+def findSymmetricObject(ctrl, left=True, right=True):
+    L_starts = {"L_": "R_", "l_": "r_"}
+    L_ends = {"_l": "_r"}
+
+    R_starts = {"R_": "L_", "r_": "l_"}
+    R_ends = {"_r": "_l"}
+
+    for enable, starts, ends in [(left, L_starts, L_ends), (right, R_starts, R_ends)]:
+        if enable:
+            for s in starts:
+                if ctrl.startswith(s):
+                    ctrl_mirrored = starts[s] + str(ctrl)[len(s):]
+                    if cmds.objExists(ctrl_mirrored):
+                        return pm.PyNode(ctrl_mirrored)
+
+            for s in ends:
+                if ctrl.endswith(s):
+                    ctrl_mirrored = str(ctrl)[:-len(s)] + ends[s]
+                    if cmds.objExists(ctrl_mirrored):
+                        return pm.PyNode(ctrl_mirrored)
+
+    return ctrl
+
 def shortenValue(v, epsilon=0.00001):
     return 0 if abs(v) < epsilon else v
 
@@ -503,14 +526,10 @@ class Skeleposer(object):
         for j in joints:
             idx = self.getJointIndex(j)
 
-            if j.startswith("L_"):
-                j_mirrored = j.replace("L_", "R_")
-            elif j.startswith("R_"):
+            j_mirrored = findSymmetricObject(j, right=False) # don't mirror from right joints to left ones
+            if j == j_mirrored:
                 continue
-            else:
-                j_mirrored = j
 
-            j_mirrored = pm.PyNode(j_mirrored)
             mirror_idx = self.getJointIndex(j_mirrored)
 
             j_mbase = dagPose_getWorldMatrix(dagPose, j) # get base world matrices
@@ -538,14 +557,7 @@ class Skeleposer(object):
         for j in self.getPoseJoints(poseIndex):
             idx = self.getJointIndex(j)
 
-            if j.startswith("L_"):
-                j_mirrored = j.replace("L_", "R_")
-            elif j.startswith("R_"):
-                j_mirrored = j.replace("R_", "L_")
-            else:
-                j_mirrored = j.name()
-
-            j_mirrored = pm.PyNode(j_mirrored)
+            j_mirrored = findSymmetricObject(j)
             mirror_idx = self.getJointIndex(j_mirrored)
 
             j_mbase = dagPose_getWorldMatrix(dagPose, j)
@@ -1663,11 +1675,8 @@ class ToolsWidget(QWidget):
         joints = sorted(pm.ls(sl=True, type=["joint", "transform"]), key=lambda j: len(j.getAllParents())) # sort by parents number, process parents first
 
         for L_joint in joints:
-            R_joint = L_joint.name().replace("L_", "R_")
-
-            if pm.objExists(R_joint) and L_joint != R_joint:
-                R_joint = pm.PyNode(R_joint)
-            else:
+            R_joint = findSymmetricObject(L_joint, right=False) # search only for left joints
+            if L_joint == R_joint:
                 continue
 
             L_m = L_joint.wm.get()
