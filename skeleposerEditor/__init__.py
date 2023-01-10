@@ -209,6 +209,31 @@ def undoBlock(f):
         return out
     return inner
 
+def findTargetIndexByName(blend, name):
+    for aw in blend.w:
+        if pm.aliasAttr(aw, q=True)==name:
+            return aw.index()
+
+def findAvailableTargetIndex(blend):
+    idx = 0
+    while blend.w[idx].exists():
+        idx += 1
+    return idx
+
+def getBlendShapeTargetDelta(blendShape, targetIndex):
+    targetDeltas = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputPointsTarget.get()
+    targetComponentsPlug = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputComponentsTarget.__apimplug__()
+
+    targetIndices = []
+    componentList = api.MFnComponentListData(targetComponentsPlug.asMObject())
+    for i in range(componentList.length()):
+        compTargetIndices = api.MIntArray()
+        singleIndexFn = api.MFnSingleIndexedComponent(componentList[i])
+        singleIndexFn.getElements(compTargetIndices)
+        targetIndices += compTargetIndices
+        
+    return targetIndices, targetDeltas    
+
 class Skeleposer(object):
     TrackAttrs = ["t","tx","ty","tz","r","rx","ry","rz","s","sx","sy","sz"]
 
@@ -734,6 +759,86 @@ class Skeleposer(object):
                     pdm = destPose.poseDeltaMatrices[j_idx]
                     pdm.set( blendMatrices(pm.dt.Matrix(), pdm.get(), w) )
 
+    def addSplitBlends(self, blendShape, targetName, poses):
+        blendShape = pm.PyNode(blendShape)
+
+        targetIndex = findTargetIndexByName(blendShape, targetName)
+        if targetIndex is None:
+            pm.warning("Cannot find '{}' target in {}".format(targetName, blendShape))
+            return
+
+        mesh = blendShape.getOutputGeometry()[0]
+
+        blendShape.envelope.set(0) # turn off blendShapes
+
+        basePoints = api.MPointArray()
+        meshFn = api.MFnMesh(mesh.__apimdagpath__())
+        meshFn.getPoints(basePoints)
+
+        offsetsList = []
+        sumOffsets = [0.00001] * basePoints.length() 
+        for poseName in poses:
+            poseIndex = self.findPoseIndexByName(poseName)
+            if poseIndex is not None:
+                pose = self.node.poses[poseIndex]
+
+                inputs = pose.poseWeight.inputs(p=True)
+                if inputs:
+                    pm.disconnectAttr(inputs[0], pose.poseWeight)
+                pose.poseWeight.set(1)
+
+                points = api.MPointArray()
+                meshFn.getPoints(points)
+                
+                offsets = [0]*points.length()
+                for i in range(points.length()):
+                    offsets[i] = (points[i] - basePoints[i]).length()
+                    sumOffsets[i] += offsets[i]**2
+                
+                offsetsList.append(offsets)
+                
+                if inputs:
+                    inputs[0] >> pose.poseWeight
+                else:
+                    pose.poseWeight.set(0)           
+                
+            else:
+                pm.warning("Cannot find '{}' pose".format(poseName))
+
+        blendShape.envelope.set(1)
+        
+        targetGeo = pm.PyNode(pm.sculptTarget(blendShape, e=True, regenerate=True, target=targetIndex)[0])
+        targetIndices, targetDeltas = getBlendShapeTargetDelta(blendShape, targetIndex)
+
+        targetDeltaList = []    
+        for poseName in poses: # per pose
+            poseTargetIndex = findTargetIndexByName(blendShape, poseName)
+            if poseTargetIndex is None:
+                poseTargetIndex = findAvailableTargetIndex(blendShape)
+                tmp = pm.duplicate(targetGeo)[0]
+                tmp.rename(poseName)
+                cmds.blendShape(blendShape.name(), e=True, t=[mesh.name(), poseTargetIndex, tmp.name(), 1])
+                pm.delete(tmp)
+                
+            poseTargetDeltas = [pm.dt.Point(p) for p in targetDeltas] # copy delta for each pose target, indices won't be changed
+            targetDeltaList.append((poseTargetIndex, targetIndices, poseTargetDeltas))
+
+            poseIndex = self.findPoseIndexByName(poseName)
+            if poseIndex is not None:
+                self.node.poses[poseIndex].poseWeight >> blendShape.w[poseTargetIndex]
+
+        pm.delete(targetGeo)
+        
+        for i, (poseTargetIndex, targetIndices, targetDeltas) in enumerate(targetDeltaList): # i - 0..len(poses)
+            for k, idx in enumerate(targetIndices):
+                w = offsetsList[i][idx]**2 / sumOffsets[idx]
+                targetDeltas[k] *= w
+
+            targetComponents = ["vtx[%d]"%v for v in targetIndices]
+            blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputPointsTarget.set(len(targetDeltas), *targetDeltas, type="pointArray")
+            blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputComponentsTarget.set(len(targetComponents), *targetComponents, type="componentList")
+
+
     def toJson(self):
         data = {"joints":{}, "baseMatrices":{}, "poses": {}, "directories": {}}
 
@@ -868,104 +973,6 @@ class Skeleposer(object):
                 self.node.poses[pi].poseDeltaMatrices[di].set(getDelta(poses[pi][di], bmat, pmat, blendMode))
 
 ####################################################################################
-def findTargetIndexByName(blend, name):
-    for aw in blend.w:
-        if pm.aliasAttr(aw, q=True)==name:
-            return aw.index()
-
-def findAvailableTargetIndex(blend):
-    idx = 0
-    while blend.w[idx].exists():
-        idx += 1
-    return idx
-
-def addSplitBlends(mesh, blendShape, targetName, skel, poses, initialWeightsOnly=False):
-    skel = skel if isinstance(skel, Skeleposer) else Skeleposer(skel)
-    mesh = pm.PyNode(mesh)
-    blendShape = pm.PyNode(blendShape)
-
-    blendShape.envelope.set(0)
-
-    basePoints = api.MPointArray()
-    meshFn = api.MFnMesh(mesh.__apimdagpath__())
-    meshFn.getPoints(basePoints)
-
-    offsetsList = []
-    for poseName in poses:
-        poseIndex = skel.findPoseIndexByName(poseName)
-        if poseIndex is not None:
-            pose = skel.node.poses[poseIndex]
-
-            inputs = pose.poseWeight.inputs(p=True)
-            if inputs:
-                pm.disconnectAttr(inputs[0], pose.poseWeight)
-
-            pose.poseWeight.set(1)
-
-            points = api.MPointArray()
-            meshFn.getPoints(points)
-
-            offsets = [0]*points.length()
-            for i in range(points.length()):
-                offsets[i] = (points[i] - basePoints[i]).length()
-
-            if inputs:
-                inputs[0] >> pose.poseWeight
-            else:
-                pose.poseWeight.set(0)
-
-            offsetsList.append(offsets)
-
-    blendShape.envelope.set(1)
-
-    targetIndex = findTargetIndexByName(blendShape, targetName)
-    targetGeo = pm.PyNode(pm.sculptTarget(blendShape, e=True, regenerate=True, target=targetIndex)[0])
-
-    targetDeltas = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputPointsTarget.get()
-    targetComponents = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputComponentsTarget.get()
-
-    poseTargetIndices = []
-    updateWeightsFor = []
-    for poseName in poses:
-        blendPoseName = targetName+"_"+poseName
-        idx = findTargetIndexByName(blendShape, blendPoseName)
-        if idx is None:
-            idx = findAvailableTargetIndex(blendShape)
-            tmp = pm.duplicate(targetGeo)[0]
-            tmp.rename(blendPoseName)
-            cmds.blendShape(blendShape.name(), e=True, t=[mesh.name(), idx, tmp.name(), 1])
-            pm.delete(tmp)
-
-            updateWeightsFor.append(idx)
-
-        elif not initialWeightsOnly:
-            updateWeightsFor.append(idx)
-
-        blendShape.inputTarget[0].inputTargetGroup[idx].inputTargetItem[6000].inputPointsTarget.set(len(targetDeltas), *targetDeltas, type="pointArray")
-        blendShape.inputTarget[0].inputTargetGroup[idx].inputTargetItem[6000].inputComponentsTarget.set(len(targetComponents), *targetComponents, type="componentList")
-
-        poseIndex = skel.findPoseIndexByName(poseName)
-        if poseIndex is not None:
-            skel.node.poses[poseIndex].poseWeight >> blendShape.w[idx]
-
-        poseTargetIndices.append(idx)
-
-    pm.delete(targetGeo)
-
-    for i in range(mesh.numVertices()):
-        summa = 0
-        for k in range(len(poses)):
-            summa += offsetsList[k][i]**2
-
-        for k in range(len(poses)):
-            if k not in updateWeightsFor:
-                continue
-
-            if summa > 0.001:
-                w = offsetsList[k][i]**2 / summa
-                cmds.setAttr("{}.inputTarget[0].inputTargetGroup[{}].targetWeights[{}]".format(blendShape, poseTargetIndices[k], i), w)
-            else:
-                cmds.setAttr("{}.inputTarget[0].inputTargetGroup[{}].targetWeights[{}]".format(blendShape, poseTargetIndices[k], i), 0)
 
 @undoBlock
 def editButtonClicked(btn, item):
@@ -1037,12 +1044,12 @@ def setItemWidgets(item):
         changeDriverBtn = ChangeButtonWidget(item, label, parent=tw)
         tw.setItemWidget(item, 3, changeDriverBtn)
 
-def getAllChildren(item):
+def getChildrenRecursively(item):
     children = []
     for i in range(item.childCount()):
         ch = item.child(i)
         children.append(ch)
-        children += getAllChildren(ch)
+        children += getChildrenRecursively(ch)
     return children
 
 def getAllParents(item):
@@ -1427,7 +1434,7 @@ class TreeWidget(QTreeWidget):
             allParents += getAllParents(sel)
 
         allParents = set(allParents)
-        for ch in getAllChildren(self.invisibleRootItem()):
+        for ch in getChildrenRecursively(self.invisibleRootItem()):
             if ch not in allParents:
                 ch.setExpanded(False)
 
@@ -1460,7 +1467,7 @@ class TreeWidget(QTreeWidget):
                 skel.mirrorPose(sel.poseIndex)
 
             elif sel.directoryIndex is not None:
-                self.mirrorItems(getAllChildren(sel))
+                self.mirrorItems(getChildrenRecursively(sel))
 
 
     @undoBlock
@@ -1470,7 +1477,7 @@ class TreeWidget(QTreeWidget):
                 skel.flipPose(sel.poseIndex)
 
             elif sel.directoryIndex is not None:
-                self.flipItems(getAllChildren(sel))
+                self.flipItems(getChildrenRecursively(sel))
 
     @undoBlock
     def resetWeights(self):
@@ -1599,6 +1606,10 @@ class TreeWidget(QTreeWidget):
 
         for item in self.dragItems:
             self.treeItemChanged(item)
+
+            if item.directoryIndex is not None: # update widgets for all children
+                for ch in getChildrenRecursively(item):
+                    setItemWidgets(ch)          
 
 class SkeleposerSelectorWidget(QLineEdit):
     nodeChanged = Signal(str)
