@@ -104,7 +104,7 @@ FRigUnit_Skeleposer_Execute()
 						if (Pose.BlendMode == FPoseBlendMode::ADDITIVE)
 						{
 							Translation += Pose.Delta.GetTranslation() * PoseWeight;
-							Rotation = FQuat::Slerp(Rotation, Pose.Delta.GetRotation() * Rotation, PoseWeight);
+							Rotation = FQuat::Slerp(Rotation, Rotation * Pose.Delta.GetRotation(), PoseWeight);
 							Scale = FMath::Lerp(Scale, Pose.Delta.GetScale3D() * Scale, PoseWeight);
 						}
 
@@ -158,8 +158,8 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 	BonePoses.Reset();
 	PoseNameList.Reset();
 
-	const FTransform RootTransform(FQuat(-0.707106769, 0, 0, 0.707106709)); // Q = FQuat::MakeFromEuler(FVector(90, 0, 0));
-	const FTransform RootTransformInverse(FQuat(0.707106769, 0, 0, 0.707106709));  // Q.Inverse
+	const FMatrix RootMatrix = FQuat(-0.707106769, 0, 0, 0.707106709).ToMatrix(); // Q = FQuat::MakeFromEuler(FVector(90, 0, 0));
+	const FMatrix RootMatrixInverse = FQuat(0.707106769, 0, 0, 0.707106709).ToMatrix();  // Q.Inverse
 
 	FString JsonContent;
 	FFileHelper::LoadFileToString(JsonContent, *FullFilePath);
@@ -253,10 +253,8 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 					for (int j = 0; j < 4; j++)
 						Mat.M[i][j] = DeltaMatrixValue[i * 4 + j]->AsNumber();
 
-				FTransform PoseDelta(ConvertMatrixFromMayaToUE(Mat));
-
 				// convert axes from Maya to UE
-				PoseDelta = RootTransform * PoseDelta * RootTransformInverse;
+				FTransform PoseDelta(RootMatrix * ConvertMatrixFromMayaToUE(Mat) * RootMatrixInverse);
 
 				// revert scale axes
 				FMatrix NoScaleMatrix = PoseDelta.ToMatrixNoScale();
