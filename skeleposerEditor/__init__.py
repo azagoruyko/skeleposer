@@ -748,6 +748,7 @@ class Skeleposer(object):
             destPose = self.node.poses[idx]
 
         self.copyPose(srcPose.index(), destPose.index())
+        destPose.poseWeight.set(0)
 
         for j in self.getPoseJoints(destPose.index()):
             j_idx = self.getJointIndex(j)
@@ -809,6 +810,7 @@ class Skeleposer(object):
         
         targetGeo = pm.PyNode(pm.sculptTarget(blendShape, e=True, regenerate=True, target=targetIndex)[0])
         targetIndices, targetDeltas = getBlendShapeTargetDelta(blendShape, targetIndex)
+        targetComponents = ["vtx[%d]"%v for v in targetIndices]
 
         targetDeltaList = []    
         for poseName in poses: # per pose
@@ -817,11 +819,11 @@ class Skeleposer(object):
                 poseTargetIndex = findAvailableTargetIndex(blendShape)
                 tmp = pm.duplicate(targetGeo)[0]
                 tmp.rename(poseName)
-                cmds.blendShape(blendShape.name(), e=True, t=[mesh.name(), poseTargetIndex, tmp.name(), 1])
+                pm.blendShape(blendShape, e=True, t=[mesh, poseTargetIndex, tmp, 1])
                 pm.delete(tmp)
-                
+            
             poseTargetDeltas = [pm.dt.Point(p) for p in targetDeltas] # copy delta for each pose target, indices won't be changed
-            targetDeltaList.append((poseTargetIndex, targetIndices, poseTargetDeltas))
+            targetDeltaList.append((poseTargetIndex, poseTargetDeltas))
 
             poseIndex = self.findPoseIndexByName(poseName)
             if poseIndex is not None:
@@ -829,15 +831,13 @@ class Skeleposer(object):
 
         pm.delete(targetGeo)
         
-        for i, (poseTargetIndex, targetIndices, targetDeltas) in enumerate(targetDeltaList): # i - 0..len(poses)
+        for i, (poseTargetIndex, targetDeltas) in enumerate(targetDeltaList): # i - 0..len(poses)
             for k, idx in enumerate(targetIndices):
                 w = offsetsList[i][idx]**2 / sumOffsets[idx]
                 targetDeltas[k] *= w
-
-            targetComponents = ["vtx[%d]"%v for v in targetIndices]
+            
             blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputPointsTarget.set(len(targetDeltas), *targetDeltas, type="pointArray")
             blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputComponentsTarget.set(len(targetComponents), *targetComponents, type="componentList")
-
 
     def toJson(self):
         data = {"joints":{}, "baseMatrices":{}, "poses": {}, "directories": {}}
