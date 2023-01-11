@@ -17,10 +17,10 @@ RootDirectory = os.path.dirname(__file__)
 
 def findSymmetricObject(ctrl, left=True, right=True):
     L_starts = {"L_": "R_", "l_": "r_"}
-    L_ends = {"_l": "_r"}
+    L_ends = {"_L": "_R", "_l": "_r"}
 
     R_starts = {"R_": "L_", "r_": "l_"}
-    R_ends = {"_r": "_l"}
+    R_ends = {"_R": "_L", "_r": "_l"}
 
     for enable, starts, ends in [(left, L_starts, L_ends), (right, R_starts, R_ends)]:
         if enable:
