@@ -1044,14 +1044,6 @@ def setItemWidgets(item):
         changeDriverBtn = ChangeButtonWidget(item, label, parent=tw)
         tw.setItemWidget(item, 3, changeDriverBtn)
 
-def getChildrenRecursively(item):
-    children = []
-    for i in range(item.childCount()):
-        ch = item.child(i)
-        children.append(ch)
-        children += getChildrenRecursively(ch)
-    return children
-
 def getAllParents(item):
     allParents = []
 
@@ -1207,11 +1199,12 @@ class TreeWidget(QTreeWidget):
                 item = makePoseItem(ch)
                 parentItem.addChild(item)
 
-            setItemWidgets(item)
-
     def updateTree(self):
-        self.clear()
+        self.clear()        
         self.addItemsFromSkeleposerData(self.invisibleRootItem(), skel.getDirectoryData())
+
+        for ch in self.getChildrenRecursively(self.invisibleRootItem()):
+            setItemWidgets(ch)
 
     def keyPressEvent(self, event):
         shift = event.modifiers() & Qt.ShiftModifier
@@ -1240,6 +1233,9 @@ class TreeWidget(QTreeWidget):
 
             elif key == Qt.Key_F:
                 self.flipItems()
+
+            elif key == Qt.Key_Z:
+                pm.undo()
 
             elif key == Qt.Key_Space:
                 self.collapseOthers()
@@ -1427,6 +1423,22 @@ class TreeWidget(QTreeWidget):
                 skel.changePoseBlendMode(sel.poseIndex, blend)
                 updateItemVisuals(sel)
 
+    def getChildrenRecursively(self, item, pose=True, directory=True):
+        children = []
+        for i in range(item.childCount()):
+            ch = item.child(i)
+            
+            if ch.poseIndex is not None and not pose:
+                continue
+
+            if ch.directoryIndex is not None and not directory:
+                continue
+
+            children.append(ch)
+            children += self.getChildrenRecursively(ch, pose, directory)
+
+        return children
+
     def collapseOthers(self):
         selectedItems = self.selectedItems()
 
@@ -1435,7 +1447,7 @@ class TreeWidget(QTreeWidget):
             allParents += getAllParents(sel)
 
         allParents = set(allParents)
-        for ch in getChildrenRecursively(self.invisibleRootItem()):
+        for ch in self.getChildrenRecursively(self.invisibleRootItem()):
             if ch not in allParents:
                 ch.setExpanded(False)
 
@@ -1448,6 +1460,8 @@ class TreeWidget(QTreeWidget):
             (sel.parent() or self.invisibleRootItem()).removeChild(sel)
             dirItem.addChild(sel)
             self.treeItemChanged(sel)
+
+        dirItem.setSelected(True)
 
     def copyPoseJointsDelta(self, joints=None):
         currentItem = self.currentItem()
@@ -1468,7 +1482,7 @@ class TreeWidget(QTreeWidget):
                 skel.mirrorPose(sel.poseIndex)
 
             elif sel.directoryIndex is not None:
-                self.mirrorItems(getChildrenRecursively(sel))
+                self.mirrorItems(self.getChildrenRecursively(sel))
 
 
     @undoBlock
@@ -1478,7 +1492,7 @@ class TreeWidget(QTreeWidget):
                 skel.flipPose(sel.poseIndex)
 
             elif sel.directoryIndex is not None:
-                self.flipItems(getChildrenRecursively(sel))
+                self.flipItems(self.getChildrenRecursively(sel))
 
     @undoBlock
     def resetWeights(self):
@@ -1605,6 +1619,7 @@ class TreeWidget(QTreeWidget):
     def dragMoveEvent(self, event):
         QTreeWidget.dragMoveEvent(self, event)
 
+    @undoBlock
     def dropEvent(self, event):
         QTreeWidget.dropEvent(self, event)
 
@@ -1612,7 +1627,7 @@ class TreeWidget(QTreeWidget):
             self.treeItemChanged(item)
 
             if item.directoryIndex is not None: # update widgets for all children
-                for ch in getChildrenRecursively(item):
+                for ch in self.getChildrenRecursively(item):
                     setItemWidgets(ch)          
 
 class SkeleposerSelectorWidget(QLineEdit):
@@ -1999,14 +2014,64 @@ class SkeleposerWindow(QFrame):
         self.skeleposerSelectorWidget.setText(str(node))
         self.toolsWidget.hide()
 
-'''
 def undoRedoCallback():
-    if editPoseIndex is None and skeleposerWindow.isVisible():
-        skeleposerWindow.treeWidget.updateTree()
+    if not skel or not skel.node.exists():
+        return
+
+    tree = skeleposerWindow.treeWidget
+
+    def getSkeleposerState(idx=0):
+        data = {"d":idx, "l":skel.node.directories[idx].directoryName.get() or "", "ch":[]}
+
+        for chIdx in skel.node.directories[idx].directoryChildrenIndices.get() or []:
+            if chIdx >= 0:
+                data["ch"].append([chIdx, skel.node.poses[chIdx].poseName.get()]) # [idx, poseName]
+            else:
+                data["ch"].append(getSkeleposerState(-chIdx)) # directories are negative
+        return data
+
+    def getItemsState(item=tree.invisibleRootItem(), idx=0): 
+        data = {"d":idx, "l":item.text(0), "ch":[]}
+
+        for i in range(item.childCount()):
+            ch = item.child(i)
+            if ch.poseIndex is not None:
+                data["ch"].append([ch.poseIndex, ch.text(0)])
+            elif ch.directoryIndex is not None:
+                data["ch"].append(getItemsState(ch, ch.directoryIndex))
+        return data
+
+    if getItemsState() == getSkeleposerState():
+        return
+    
+    selectedIndices = [] # poses > 0, directories < 0
+    for sel in tree.selectedItems():
+        if sel.poseIndex is not None:
+            selectedIndices.append(sel.poseIndex)
+        elif sel.directoryIndex is not None:
+            selectedIndices.append(-sel.directoryIndex)
+    
+    print("SkeleposerEditor undo")
+
+    expanded = {}
+    for ch in tree.getChildrenRecursively(tree.invisibleRootItem(), pose=False):
+        expanded[ch.directoryIndex] = ch.isExpanded()
+
+    tree.clear()        
+    tree.addItemsFromSkeleposerData(tree.invisibleRootItem(), skel.getDirectoryData())           
+
+    for ch in tree.getChildrenRecursively(tree.invisibleRootItem()):
+        setItemWidgets(ch)
+             
+        if ch.directoryIndex in expanded:
+            ch.setExpanded(expanded[ch.directoryIndex])
+
+        if (ch.poseIndex is not None and ch.poseIndex in selectedIndices) or\
+           (ch.directoryIndex is not None and -ch.directoryIndex in selectedIndices):
+            ch.setSelected(True)
 
 pm.scriptJob(e=["Undo", undoRedoCallback])
 pm.scriptJob(e=["Redo", undoRedoCallback])
-'''
 
 skel = None
 editPoseIndex = None
