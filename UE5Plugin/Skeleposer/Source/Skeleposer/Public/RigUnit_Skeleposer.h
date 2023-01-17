@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Created by Alexander Zagoruyko. Published in 2023
 
 #pragma once
 
@@ -142,6 +142,12 @@ struct FRigUnit_Skeleposer_WorkData
 	/** Poses be bone name */
 	TMap<FString, TArray<FBonePose>> BonePoses;
 	FString FilePathCache;
+
+	void Reset()
+	{
+		BonePoses.Reset();
+		FilePathCache = "";
+	}
 
 	void ReadJsonFile(const FString &FilePath, TArray<FString> &PoseNameList);
 };

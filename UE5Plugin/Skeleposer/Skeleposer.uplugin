@@ -1,15 +1,16 @@
 {
     "FileVersion": 3,
     "Version": 1,
+    "EngineVersion": "5.1.0",
     "VersionName": "1.0",
     "FriendlyName": "Skeleposer",
     "Description": "Skeleposer is like Shape Editor in Maya but works for skeleton",
-    "Category": "Other",
+    "Category": "Animation",
     "CreatedBy": "Alexander Zagoruyko",
     "CreatedByURL": "",
     "DocsURL": "",
     "EnabledByDefault": true,
-    "MarketplaceURL": "",
+    "MarketplaceURL": "com.epicgames.launcher://ue/marketplace/product/3024f3d0608f433c95a6d0ccf86b94e9",
     "SupportURL": "",
     "CanContainContent": true,
     "IsBetaVersion": false,
@@ -20,7 +21,8 @@
         {
             "Name": "Skeleposer",
             "Type": "Runtime",
-            "LoadingPhase": "Default"
+            "LoadingPhase": "Default",
+            "WhitelistPlatforms": [ "Win64", "Win32", "Android" ]
         }
     ],
     "Plugins":

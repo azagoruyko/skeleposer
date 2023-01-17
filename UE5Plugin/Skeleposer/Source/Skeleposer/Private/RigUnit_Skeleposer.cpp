@@ -1,5 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// Created by Alexander Zagoruyko. Published in 2023
 
 #include "RigUnit_Skeleposer.h"
 
@@ -12,11 +11,13 @@
 
 #define LOCTEXT_NAMESPACE "Skeleposer"
 
-inline void DRAW_TEXT(const FString& s, const FColor &Color=FColor::Yellow)
+inline void DisplayError(const FString& s, const FColor &Color=FColor::Red)
 {
+#if WITH_EDITOR	
 	if (GEngine)
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, Color, *s);
+		GEngine->AddOnScreenDebugMessage(-1, 5.0, Color, *s);
 	UE_LOG(LogTemp, Warning, TEXT("%s"), *s);
+#endif
 }
 
 inline FMatrix ConvertMatrixFromMayaToUE(const FMatrix& Mat)
@@ -54,12 +55,34 @@ FRigUnit_Skeleposer_Execute()
 
 	if (Context.State == EControlRigState::Init)
 	{
-		WorkData.ReadJsonFile(FilePath, PoseNameList);
+		WorkData.Reset();
 		return;
 	}
+
 	else if (Context.State == EControlRigState::Update)
 	{
-		TMap<FString, float> PoseWeights;
+		// Read JSON file only once unless the path is changed
+		if (FilePath != WorkData.FilePathCache) 
+		{
+			WorkData.FilePathCache = FilePath; // cache file path
+
+			const FString FullFilePath = FPaths::ProjectContentDir() + "/" + FilePath;
+			if (!FPaths::FileExists(FullFilePath))
+			{
+				DisplayError("Cannot find '" + FilePath + "'. FilePath must be relative to the project's content directory", FColor::Red);
+				return;
+			}
+
+			WorkData.ReadJsonFile(FullFilePath, PoseNameList);
+		}
+
+		if (WorkData.BonePoses.IsEmpty())
+		{
+			UE_CONTROLRIG_RIGUNIT_REPORT_WARNING(TEXT("No poses loaded from the file"));
+			return;
+		}
+
+		TMap<FString, float> PoseWeights; // user poses' weights and weights that are calculated during the computation
 		for (const auto &UserPose : UserPoses)
 			PoseWeights.Add(UserPose.PoseName, UserPose.PoseWeight);
 
@@ -141,20 +164,6 @@ FRigUnit_Skeleposer_Execute()
 
 void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<FString>& PoseNameList)
 {
-	if (FilePath == FilePathCache) 
-		return;
-	FilePathCache = FilePath; // cache file path
-
-	DRAW_TEXT("Read json file");
-
-	const FString FullFilePath = FPaths::ProjectContentDir() + "/" + FilePath;
-
-	if (!FPaths::FileExists(FullFilePath))
-	{
-		DRAW_TEXT("Cannot find '" + FullFilePath + "'. Path must be relative to the project's content directory");
-		return;
-	}
-
 	BonePoses.Reset();
 	PoseNameList.Reset();
 
@@ -162,7 +171,7 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 	const FMatrix RootMatrixInverse = FQuat(0.707106769, 0, 0, 0.707106709).ToMatrix();  // Q.Inverse
 
 	FString JsonContent;
-	FFileHelper::LoadFileToString(JsonContent, *FullFilePath);
+	FFileHelper::LoadFileToString(JsonContent, *FilePath);
 
 	TSharedPtr<FJsonObject> JsonObject;
 	auto Reader = TJsonReaderFactory<>::Create(JsonContent);
@@ -241,6 +250,15 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 					const double Y = PointArray[1]->AsNumber();
 					Pose.Inbetween.Value.Points.Add(FVector2D(X,Y));
 				}
+
+				// pin both ends
+				FVector2D FirstPoint = Pose.Inbetween.Value.Points[0];
+				FVector2D LastPoint = Pose.Inbetween.Value.Points.Top();
+				FirstPoint.X = 0;
+				LastPoint.X = 1;
+
+				Pose.Inbetween.Value.Points.Insert(FirstPoint, 0);
+				Pose.Inbetween.Value.Points.Add(LastPoint);
 			}
 
 			for (const auto& DeltaMatricesItem : PoseValues["poseDeltaMatrices"]->AsObject()->Values)
