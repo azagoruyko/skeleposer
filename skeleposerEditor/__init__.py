@@ -1418,6 +1418,7 @@ class TreeWidget(QTreeWidget):
             if sel.poseIndex is not None:
                 item = self.makePose(sel.text(0)+"_inbtw", self.getValidParent())
                 skel.makeInbetweenNode(item.poseIndex, sel.poseIndex)
+                setItemWidgets(item)
 
     @undoBlock
     def setPoseBlendMode(self, blend):
@@ -1518,6 +1519,7 @@ class TreeWidget(QTreeWidget):
         if currentItem and currentItem.poseIndex is not None:
             indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None and item is not currentItem]
             skel.makeCorrectNode(currentItem.poseIndex, indices)
+            setItemWidgets(currentItem)
 
     @undoBlock
     def inbetweenFromSelection(self):
@@ -1525,6 +1527,7 @@ class TreeWidget(QTreeWidget):
         if currentItem and currentItem.poseIndex is not None:
             indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None and item is not currentItem]
             skel.makeInbetweenNode(currentItem.poseIndex, indices[-1])
+            setItemWidgets(currentItem)
 
     @undoBlock
     def addCorrectivePose(self):
@@ -1533,6 +1536,7 @@ class TreeWidget(QTreeWidget):
 
         item = self.makePose("_".join(names)+"_correct", self.getValidParent())
         skel.makeCorrectNode(item.poseIndex, indices)
+        setItemWidgets(item)
 
     @undoBlock
     def removeItems(self):
