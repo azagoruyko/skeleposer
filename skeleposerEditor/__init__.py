@@ -748,7 +748,8 @@ class Skeleposer(object):
             destPose = self.node.poses[idx]
 
         self.copyPose(srcPose.index(), destPose.index())
-        destPose.poseWeight.set(0)
+        if destPose.poseWeight.isSettable():
+            destPose.poseWeight.set(0)
 
         for j in self.getPoseJoints(destPose.index()):
             j_idx = self.getJointIndex(j)
