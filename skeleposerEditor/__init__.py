@@ -1,6 +1,6 @@
-from Qt.QtGui import *
-from Qt.QtCore import *
-from Qt.QtWidgets import *
+from PySide2.QtGui import *
+from PySide2.QtCore import *
+from PySide2.QtWidgets import *
 
 import maya.api.OpenMaya as om
 import pymel.core as pm
@@ -1123,8 +1123,6 @@ class ChangeButtonWidget(QWidget):
         inputs = skel.node.poses[self.item.poseIndex].poseWeight.inputs(p=True)
         if inputs:
             driver = inputs[0]
-
-            print(pm.objectType(driver.node()))
 
             if pm.objectType(driver.node()) in ["remapValue", "unitConversion", "combinationShape"]:
                 pm.delete(driver.node())
