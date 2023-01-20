@@ -38,7 +38,7 @@ def findSymmetricObject(ctrl, left=True, right=True):
 
     return ctrl
 
-def shortenValue(v, epsilon=0.00001):
+def shortenValue(v, epsilon=1e-5):
     return 0 if abs(v) < epsilon else v
 
 def set_matrixRC(m, r, c, v):
@@ -231,8 +231,8 @@ def getBlendShapeTargetDelta(blendShape, targetIndex):
         singleIndexFn = api.MFnSingleIndexedComponent(componentList[i])
         singleIndexFn.getElements(compTargetIndices)
         targetIndices += compTargetIndices
-        
-    return targetIndices, targetDeltas    
+
+    return targetIndices, targetDeltas
 
 class Skeleposer(object):
     TrackAttrs = ["t","tx","ty","tz","r","rx","ry","rz","s","sx","sy","sz"]
@@ -672,7 +672,7 @@ class Skeleposer(object):
 
         for j in self.getJoints():
             self._editPoseData["joints"][j.name()] = getLocalMatrix(j)
-            
+
         self.node.poses[idx].poseEnabled.set(True) # enable pose
 
         self.disconnectOutputs()
@@ -759,7 +759,10 @@ class Skeleposer(object):
                 if re.search(pattern, j.name()):
                     w = kwargs[pattern]
                     pdm = destPose.poseDeltaMatrices[j_idx]
-                    pdm.set( blendMatrices(pm.dt.Matrix(), pdm.get(), w) )
+                    if w > 1e-3:
+                        pdm.set( blendMatrices(pm.dt.Matrix(), pdm.get(), w) )
+                    else:
+                        pm.removeMultiInstance(pdm, b=True)
 
     def addSplitBlends(self, blendShape, targetName, poses):
         blendShape = pm.PyNode(blendShape)
@@ -778,7 +781,7 @@ class Skeleposer(object):
         meshFn.getPoints(basePoints)
 
         offsetsList = []
-        sumOffsets = [0.00001] * basePoints.length() 
+        sumOffsets = [1e-5] * basePoints.length()
         for poseName in poses:
             poseIndex = self.findPoseIndexByName(poseName)
             if poseIndex is not None:
@@ -791,29 +794,29 @@ class Skeleposer(object):
 
                 points = api.MPointArray()
                 meshFn.getPoints(points)
-                
+
                 offsets = [0]*points.length()
                 for i in range(points.length()):
                     offsets[i] = (points[i] - basePoints[i]).length()
                     sumOffsets[i] += offsets[i]**2
-                
+
                 offsetsList.append(offsets)
-                
+
                 if inputs:
                     inputs[0] >> pose.poseWeight
                 else:
-                    pose.poseWeight.set(0)           
-                
+                    pose.poseWeight.set(0)
+
             else:
                 pm.warning("Cannot find '{}' pose".format(poseName))
 
         blendShape.envelope.set(1)
-        
+
         targetGeo = pm.PyNode(pm.sculptTarget(blendShape, e=True, regenerate=True, target=targetIndex)[0])
         targetIndices, targetDeltas = getBlendShapeTargetDelta(blendShape, targetIndex)
         targetComponents = ["vtx[%d]"%v for v in targetIndices]
 
-        targetDeltaList = []    
+        targetDeltaList = []
         for poseName in poses: # per pose
             poseTargetIndex = findTargetIndexByName(blendShape, poseName)
             if poseTargetIndex is None:
@@ -822,7 +825,7 @@ class Skeleposer(object):
                 tmp.rename(poseName)
                 pm.blendShape(blendShape, e=True, t=[mesh, poseTargetIndex, tmp, 1])
                 pm.delete(tmp)
-            
+
             poseTargetDeltas = [pm.dt.Point(p) for p in targetDeltas] # copy delta for each pose target, indices won't be changed
             targetDeltaList.append((poseTargetIndex, poseTargetDeltas))
 
@@ -831,12 +834,12 @@ class Skeleposer(object):
                 self.node.poses[poseIndex].poseWeight >> blendShape.w[poseTargetIndex]
 
         pm.delete(targetGeo)
-        
+
         for i, (poseTargetIndex, targetDeltas) in enumerate(targetDeltaList): # i - 0..len(poses)
             for k, idx in enumerate(targetIndices):
                 w = offsetsList[i][idx]**2 / sumOffsets[idx]
                 targetDeltas[k] *= w
-            
+
             blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputPointsTarget.set(len(targetDeltas), *targetDeltas, type="pointArray")
             blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputComponentsTarget.set(len(targetComponents), *targetComponents, type="componentList")
 
@@ -887,12 +890,12 @@ class Skeleposer(object):
                     points = []
                     for va in remapNode.value:
                         x, y, _ = va.get()
-                        points.append((x,y))                        
+                        points.append((x,y))
                     points = sorted(points, key=lambda p: p[0]) # sort by X
                     poseData["inbetween"] = [sourcePoseIndex, points]
 
             poseData["poseDeltaMatrices"] = {}
-            
+
             for m in p.poseDeltaMatrices:
                 a = "{}.poses[{}].poseDeltaMatrices[{}]".format(self.node, p.index(), m.index())
                 poseData["poseDeltaMatrices"][m.index()] = [shortenValue(v) for v in cmds.getAttr(a)]
@@ -1199,7 +1202,7 @@ class TreeWidget(QTreeWidget):
                 parentItem.addChild(item)
 
     def updateTree(self):
-        self.clear()        
+        self.clear()
         self.addItemsFromSkeleposerData(self.invisibleRootItem(), skel.getDirectoryData())
 
         for ch in self.getChildrenRecursively(self.invisibleRootItem()):
@@ -1426,7 +1429,7 @@ class TreeWidget(QTreeWidget):
         children = []
         for i in range(item.childCount()):
             ch = item.child(i)
-            
+
             if ch.poseIndex is not None and not pose:
                 continue
 
@@ -1627,7 +1630,7 @@ class TreeWidget(QTreeWidget):
 
             if item.directoryIndex is not None: # update widgets for all children
                 for ch in self.getChildrenRecursively(item):
-                    setItemWidgets(ch)          
+                    setItemWidgets(ch)
 
 class SkeleposerSelectorWidget(QLineEdit):
     nodeChanged = Signal(str)
@@ -2029,7 +2032,7 @@ def undoRedoCallback():
                 data["ch"].append(getSkeleposerState(-chIdx)) # directories are negative
         return data
 
-    def getItemsState(item=tree.invisibleRootItem(), idx=0): 
+    def getItemsState(item=tree.invisibleRootItem(), idx=0):
         data = {"d":idx, "l":item.text(0), "ch":[]}
 
         for i in range(item.childCount()):
@@ -2042,26 +2045,26 @@ def undoRedoCallback():
 
     if getItemsState() == getSkeleposerState():
         return
-    
+
     selectedIndices = [] # poses > 0, directories < 0
     for sel in tree.selectedItems():
         if sel.poseIndex is not None:
             selectedIndices.append(sel.poseIndex)
         elif sel.directoryIndex is not None:
             selectedIndices.append(-sel.directoryIndex)
-    
+
     print("SkeleposerEditor undo")
 
     expanded = {}
     for ch in tree.getChildrenRecursively(tree.invisibleRootItem(), pose=False):
         expanded[ch.directoryIndex] = ch.isExpanded()
 
-    tree.clear()        
-    tree.addItemsFromSkeleposerData(tree.invisibleRootItem(), skel.getDirectoryData())           
+    tree.clear()
+    tree.addItemsFromSkeleposerData(tree.invisibleRootItem(), skel.getDirectoryData())
 
     for ch in tree.getChildrenRecursively(tree.invisibleRootItem()):
         setItemWidgets(ch)
-             
+
         if ch.directoryIndex in expanded:
             ch.setExpanded(expanded[ch.directoryIndex])
 
