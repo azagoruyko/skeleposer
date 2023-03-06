@@ -668,12 +668,13 @@ class Skeleposer(object):
 
         self._editPoseData = {"joints":{}, "poseIndex":idx}
 
+        poseEnabled = self.node.poses[idx].poseEnabled.get()
         self.node.poses[idx].poseEnabled.set(False) # disable pose
 
         for j in self.getJoints():
             self._editPoseData["joints"][j.name()] = getLocalMatrix(j)
 
-        self.node.poses[idx].poseEnabled.set(True) # enable pose
+        self.node.poses[idx].poseEnabled.set(poseEnabled) # restore pose state
 
         self.disconnectOutputs()
 
@@ -1060,14 +1061,19 @@ def getAllParents(item):
 
 def updateItemVisuals(item):
     if item.poseIndex is not None:
+        enabled = skel.node.poses[item.poseIndex].poseEnabled.get()
         blendMode = skel.node.poses[item.poseIndex].poseBlendMode.get()
         if blendMode == 0:
             item.setBackground(0, QTreeWidgetItem().background(0))
-            item.setForeground(0, QColor(200, 200, 200))
+            item.setForeground(0, QColor(200, 200, 200) if enabled else QColor(110, 110,110))
 
         elif blendMode == 1:
-            item.setBackground(0, QColor(140,140,200))
-            item.setForeground(0, QColor(0,0,0))
+            item.setBackground(0, QColor(140,140,200) if enabled else QColor(50,50,90))
+            item.setForeground(0, QColor(0,0,0) if enabled else QColor(110, 110, 110))
+
+        font = item.font(0)
+        font.setStrikeOut(False if enabled else True)
+        item.setFont(0,font)
 
     elif item.directoryIndex is not None:
         font = item.font(0)
@@ -1252,6 +1258,9 @@ class TreeWidget(QTreeWidget):
         elif key == Qt.Key_Delete:
             self.removeItems()
 
+        elif key == Qt.Key_M:
+            self.muteItems()
+
         else:
             super(TreeWidget, self).keyPressEvent(event)
 
@@ -1301,6 +1310,10 @@ class TreeWidget(QTreeWidget):
             menu.addAction(removeAction)
 
             menu.addSeparator()
+
+            muteAction = QAction("Mute\tM", self)
+            muteAction.triggered.connect(lambda _=None: self.muteItems())
+            menu.addAction(muteAction)
 
             copyPoseDeltaAction = QAction("Copy delta\tCTRL-C", self)
             copyPoseDeltaAction.triggered.connect(lambda _=None: self.copyPoseJointsDelta())
@@ -1405,6 +1418,14 @@ class TreeWidget(QTreeWidget):
         if path:
             with open(path, "w") as f:
                 json.dump(skel.toJson(), f)
+
+    @undoBlock
+    def muteItems(self):
+        for sel in self.selectedItems():
+            if sel.poseIndex is not None:
+                a = skel.node.poses[sel.poseIndex].poseEnabled
+                a.set(not a.get())
+                updateItemVisuals(sel)
 
     def searchAndReplace(self, searchText, replaceText):
         for sel in self.selectedItems():
