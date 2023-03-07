@@ -666,7 +666,14 @@ class Skeleposer(object):
             pm.warning("Already in edit mode")
             return
 
-        self._editPoseData = {"joints":{}, "poseIndex":idx}
+        self._editPoseData = {"joints":{}, "poseIndex":idx, "input": None}
+
+        inputs = self.node.poses[idx].poseWeight.inputs(p=True)
+        if inputs:
+            pm.disconnectAttr(inputs[0], self.node.poses[idx].poseWeight)
+            self._editPoseData["input"] = inputs[0]
+
+        self.node.poses[idx].poseWeight.set(1)
 
         poseEnabled = self.node.poses[idx].poseEnabled.get()
         self.node.poses[idx].poseEnabled.set(False) # disable pose
@@ -711,6 +718,9 @@ class Skeleposer(object):
 
             else:
                 pm.removeMultiInstance(pose.poseDeltaMatrices[jointIndex], b=True)
+
+        if self._editPoseData["input"]:
+            self._editPoseData["input"] >> pose.poseWeight
 
         self.reconnectOutputs()
         self._editPoseData = {}
@@ -986,14 +996,11 @@ def editButtonClicked(btn, item):
     w = skel.node.poses[item.poseIndex].poseWeight.get()
 
     if editPoseIndex is None:
-        if w > 0.999:
-            skel.beginEditPose(item.poseIndex)
-            btn.setStyleSheet("background-color: #aaaa55")
-            skeleposerWindow.toolsWidget.show()
+        skel.beginEditPose(item.poseIndex)
+        btn.setStyleSheet("background-color: #aaaa55")
+        skeleposerWindow.toolsWidget.show()
 
-            editPoseIndex = item.poseIndex
-        else:
-            pm.warning("editButtonClicked: weight must be 1 before editing")
+        editPoseIndex = item.poseIndex
 
     elif editPoseIndex == item.poseIndex:
         skel.endEditPose()
@@ -1945,9 +1952,18 @@ class ListWithFilterWidget(QWidget):
     def itemSelectionChanged(self):
         pm.select([item.text() for item in self.listWidget.selectedItems()])
 
-    def updateItems(self, items):
+    def clearItems(self):
         self.listWidget.clear()
-        self.listWidget.addItems(items)
+
+    def addItems(self, items, bold=False, foreground=QColor(200, 200, 200)):
+        font = QListWidgetItem().font()
+        font.setBold(bold)
+
+        for it in items:
+            item = QListWidgetItem(it)
+            item.setFont(font)
+            item.setForeground(foreground)
+            self.listWidget.addItem(item)
         self.filterChanged()
 
 class SkeleposerWindow(QFrame):
@@ -2009,7 +2025,12 @@ class SkeleposerWindow(QFrame):
             if sel.poseIndex is not None:
                 joints += skel.getPoseJoints(sel.poseIndex)
 
-        self.jointsListWidget.updateItems([j.name() for j in joints])
+        allJoints = set([j.name() for j in skel.getJoints()])
+        poseJoints = set([j.name() for j in joints])
+
+        self.jointsListWidget.clearItems()
+        self.jointsListWidget.addItems(sorted(poseJoints), bold=True) # pose joints
+        self.jointsListWidget.addItems(sorted(allJoints-poseJoints), foreground=QColor(100, 100, 100)) # all joints
 
     def selectJoints(self):
         if skel:
