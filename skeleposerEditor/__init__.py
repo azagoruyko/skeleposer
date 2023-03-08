@@ -38,6 +38,13 @@ def findSymmetricObject(ctrl, left=True, right=True):
 
     return ctrl
 
+def clamp(v, mn=0.0, mx=1.0):
+    if v > mx:
+        return mx
+    elif v < mn:
+        return mn
+    return v
+
 def shortenValue(v, epsilon=1e-5):
     return 0 if abs(v) < epsilon else v
 
@@ -198,6 +205,9 @@ def getActualWeightInput(plug):
 
         else:
             return inputPlug
+
+def clearUnusedRemapValue():
+    pm.delete([n for n in pm.ls(type="remapValue") if not n.outValue.isConnected() and not n.outColor.isConnected()])
 
 def undoBlock(f):
     def inner(*args,**kwargs):
@@ -1066,6 +1076,13 @@ def getAllParents(item):
 
     return allParents[::-1]
 
+def centerWindow(w):
+    # center the window on the screen
+    qr = w.frameGeometry()
+    cp = QDesktopWidget().availableGeometry().center()
+    qr.moveCenter(cp)
+    w.move(qr.topLeft())
+
 def updateItemVisuals(item):
     if item.poseIndex is not None:
         enabled = skel.node.poses[item.poseIndex].poseEnabled.get()
@@ -1131,7 +1148,10 @@ class ChangeButtonWidget(QWidget):
     def changeDriver(self):
         driver = getActualWeightInput(skel.node.poses[self.item.poseIndex].poseWeight)
 
-        changeDialog = ChangeDriverDialog(driver, parent=mayaMainWindow)
+        remapNode = skel.node.poses[self.item.poseIndex].poseWeight.inputs(type="remapValue")
+        limit = remapNode[0].inputMax.get() if remapNode else 1
+
+        changeDialog = ChangeDriverDialog(driver, limit, parent=mayaMainWindow)
         changeDialog.accepted.connect(self.updateDriver)
         changeDialog.cleared.connect(self.clearDriver)
         changeDialog.show()
@@ -1822,7 +1842,7 @@ class ChangeDriverDialog(QDialog):
     accepted = Signal(object)
     cleared = Signal()
 
-    def __init__(self, plug=None, **kwargs):
+    def __init__(self, plug=None, limit="1", **kwargs):
         super(ChangeDriverDialog, self).__init__(**kwargs)
 
         self.setWindowTitle("Change driver")
@@ -1839,7 +1859,7 @@ class ChangeDriverDialog(QDialog):
         self.attrsWidget = QComboBox()
         self.attrsWidget.setEditable(True)
 
-        self.limitWidget = QLineEdit("1")
+        self.limitWidget = QLineEdit(str(limit))
         self.limitWidget.setValidator(QDoubleValidator())
 
         okBtn = QPushButton("Ok")
@@ -1901,7 +1921,6 @@ class ChangeDriverDialog(QDialog):
             attrs = ["translateX","translateY","translateZ","rotateX","rotateY","rotateZ","scaleX","scaleY","scaleZ"]
             attrs += [a.longName() for a in node.listAttr(s=True, se=True, ud=True)]
             self.attrsWidget.addItems(attrs)
-
             self.attrsWidget.setCurrentText(currentText)
 
 class WideSplitterHandle(QSplitterHandle):
@@ -1966,12 +1985,312 @@ class ListWithFilterWidget(QWidget):
             self.listWidget.addItem(item)
         self.filterChanged()
 
+class PoseTreeWidget(QTreeWidget):
+    somethingChanged = Signal()
+
+    def __init__(self, **kwargs):
+        super(PoseTreeWidget, self).__init__(**kwargs)
+
+        self.setHeaderLabels(["Name"])
+        self.header().setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDropIndicatorShown(True)
+        self.setAcceptDrops(True)
+
+    def contextMenuEvent(self, event):
+        if not skel or not skel.node.exists():
+            return
+
+        menu = QMenu(self)
+
+        addAction = QAction("Add", self)
+        addAction.triggered.connect(lambda _=None: self.addPoseItem())
+        menu.addAction(addAction)
+
+        if self.selectedItems():
+            duplicateAction = QAction("Duplicate", self)
+            duplicateAction.triggered.connect(lambda _=None: self.duplicatePoseItem())
+            menu.addAction(duplicateAction)
+
+        removeAction = QAction("Remove", self)
+        removeAction.triggered.connect(lambda _=None: self.removePoseItem())
+        menu.addAction(removeAction)
+        menu.popup(event.globalPos())
+
+    def dragEnterEvent(self, event):
+        if event.mouseButtons() == Qt.MiddleButton:
+            QTreeWidget.dragEnterEvent(self, event)
+
+    def dragMoveEvent(self, event):
+        QTreeWidget.dragMoveEvent(self, event)
+
+    def dropEvent(self, event):
+        QTreeWidget.dropEvent(self, event)
+        self.somethingChanged.emit()
+
+    def makePoseItem(self, label="Pose"):
+        item = QTreeWidgetItem([label])
+        item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled  | Qt.ItemIsDropEnabled)
+        item.setData(0, Qt.UserRole, []) # patterns, data can be cloned
+        return item
+
+    def addPoseItem(self):
+        selectedItems = self.selectedItems()
+        selectedItem = selectedItems[0] if selectedItems else None
+
+        item = self.makePoseItem()
+        (selectedItem or self.invisibleRootItem()).addChild(item)
+
+        self.somethingChanged.emit()
+
+    def duplicatePoseItem(self):
+        for item in self.selectedItems():
+            (item.parent() or self.invisibleRootItem()).addChild(item.clone())
+        self.somethingChanged.emit()
+
+    def removePoseItem(self):
+        for item in self.selectedItems():
+            (item.parent() or self.invisibleRootItem()).removeChild(item)
+        self.somethingChanged.emit()
+
+    def toList(self, item=None): # hierarchy to list like [[a, [b, [c, d]]] => a|bc|d
+        out = []
+
+        if not item:
+            item = self.invisibleRootItem()
+        else:
+            value = (item.text(0), item.data(0, Qt.UserRole))
+            out.append(value)
+
+        for i in range(item.childCount()):
+            ch = item.child(i)
+            lst = self.toList(ch)
+
+            if ch.childCount() > 0:
+                out.append(lst)
+            else:
+                out.extend(lst)
+
+        return out
+
+    def fromList(self, data): # [[a, [b, [c, d]]]] => a|bc|d
+        def addItems(data, parent=None):
+            for ch in data:
+                itemLabel = ch[0][0] if isinstance(ch[0], list) else ch[0]
+                itemData = ch[0][1] if isinstance(ch[0], list) else ch[1]
+
+                item = self.makePoseItem(itemLabel)
+                item.setData(0, Qt.UserRole, itemData)
+                (parent or self.invisibleRootItem()).addChild(item)
+
+                if isinstance(ch[0], list): # item with children
+                    addItems(ch[1:], item)
+                    item.setExpanded(True)
+
+        self.blockSignals(True)
+        self.clear()
+        addItems(data)
+        self.blockSignals(False)
+
+class PatternTableWidget(QTableWidget):
+    somethingChanged = Signal()
+
+    def __init__(self, **kwargs):
+        super(PatternTableWidget, self).__init__(**kwargs)
+
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.setColumnCount(2)
+        self.setHorizontalHeaderLabels(["Pattern", "Value"])
+        self.verticalHeader().hide()
+
+        self.itemChanged.connect(self.validateItem)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+
+        addAction = QAction("Add", self)
+        addAction.triggered.connect(lambda _=None: self.addPatternItem())
+        menu.addAction(addAction)
+
+        if self.selectedItems():
+            duplicateAction = QAction("Duplicate", self)
+            duplicateAction.triggered.connect(lambda _=None: self.duplicatePatternItem())
+            menu.addAction(duplicateAction)
+
+        removeAction = QAction("Remove", self)
+        removeAction.triggered.connect(lambda _=None: self.removePatternItem())
+        menu.addAction(removeAction)
+        menu.popup(event.globalPos())
+
+    def validateItem(self, item):
+        self.blockSignals(True)
+        if item.column() == 1:
+            try:
+                v = float(item.text())
+            except:
+                v = 0
+            item.setText(str(clamp(v)))
+        self.blockSignals(False)
+
+    def addPatternItem(self, name="R_", value=0):
+        row = self.rowCount()
+        self.insertRow(row)
+        self.setItem(row,0, QTableWidgetItem(name))
+        self.setItem(row,1, QTableWidgetItem(str(value)))
+        self.somethingChanged.emit()
+
+    def duplicatePatternItem(self):
+        for item in self.selectedItems():
+            nameItem = self.item(item.row(), 0)
+            valueItem = self.item(item.row(), 1)
+            if nameItem and valueItem:
+                self.addPatternItem(nameItem.text(), valueItem.text())
+
+    def removePatternItem(self):
+        for item in self.selectedItems():
+            row = item.row()
+            self.removeRow(row)
+            self.somethingChanged.emit()
+
+    def fromJson(self, data):
+        self.blockSignals(True)
+        self.clearContents()
+        self.setRowCount(0)
+        for p in sorted(data):
+            self.addPatternItem(p, data[p])
+        self.blockSignals(False)
+
+    def toJson(self):
+        data = {}
+        for i in range(self.rowCount()):
+            nameItem = self.item(i, 0)
+            if nameItem:
+                valueItem = self.item(i, 1)
+                data[nameItem.text()] = float(valueItem.text()) if valueItem else 0
+        return data
+
+class SplitPoseWidget(QWidget):
+    def __init__(self, **kwargs):
+        super(SplitPoseWidget, self).__init__(**kwargs)
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        hsplitter = WideSplitter(Qt.Horizontal)
+
+        self.posesWidget = PoseTreeWidget()
+        self.posesWidget.itemSelectionChanged.connect(self.posesSelectionChanged)
+        self.posesWidget.itemChanged.connect(lambda _=None:self.patternsItemChanged())
+        self.posesWidget.somethingChanged.connect(self.patternsItemChanged)
+
+        self.patternsWidget = PatternTableWidget()
+        self.patternsWidget.itemChanged.connect(lambda _=None:self.patternsItemChanged())
+        self.patternsWidget.somethingChanged.connect(self.patternsItemChanged)
+        self.patternsWidget.setEnabled(False)
+
+        self.blendShapeWidget = QLineEdit()
+        getBlendshapeBtn = QPushButton("<<")
+        getBlendshapeBtn.clicked.connect(self.getBlendShapeNode)
+
+        blendLayout = QHBoxLayout()
+        blendLayout.addWidget(QLabel("Split blend shapes (target names must match pose names)"))
+        blendLayout.addWidget(self.blendShapeWidget)
+        blendLayout.addWidget(getBlendshapeBtn)
+
+        applyBtn = QPushButton("Apply")
+        applyBtn.clicked.connect(self.apply)
+
+        hsplitter.addWidget(self.posesWidget)
+        hsplitter.addWidget(self.patternsWidget)
+        layout.addWidget(hsplitter)
+
+        layout.addLayout(blendLayout)
+        layout.addWidget(applyBtn)
+
+    def getBlendShapeNode(self):
+        ls = pm.ls(sl=True)
+        if ls:
+            node = ls[0]
+            if isinstance(node, pm.nt.BlendShape):
+                self.blendShapeWidget.setText(node.name())
+            else:
+                blends = [n for n in pm.listHistory(node) if isinstance(n, pm.nt.BlendShape)]
+                if blends:
+                    self.blendShapeWidget.setText(blends[0].name())
+
+    def posesSelectionChanged(self):
+        selectedItems = self.posesWidget.selectedItems()
+        self.patternsWidget.setEnabled(True if selectedItems else False)
+
+        for item in selectedItems:
+            patterns = item.data(0, Qt.UserRole)
+            self.patternsWidget.fromJson(patterns)
+
+    def patternsItemChanged(self):
+        # update all patterns
+        for item in self.posesWidget.selectedItems():
+            data = self.patternsWidget.toJson()            
+            item.setData(0, Qt.UserRole, data)
+
+        self.saveToSkeleposer()
+
+    @undoBlock
+    def apply(self):
+        def applyLocal(item, sourcePose=None):
+            children = []
+            for i in range(item.childCount()):
+                ch = item.child(i)
+                destPose = ch.text(0)
+
+                if sourcePose:
+                    data = dict(ch.data(0, Qt.UserRole))
+                    print("Split pose '{}'' into '{}' with {}".format(sourcePose, destPose, str(data)))
+                    skel.addSplitPose(sourcePose, destPose, **data)
+
+                applyLocal(ch, destPose)
+                children.append(destPose)
+
+            blendShape = self.blendShapeWidget.text()
+            if pm.objExists(blendShape) and sourcePose and children:
+                print("Split blend '{}' into '{}'".format(sourcePose, " ".join(children)))
+                skel.addSplitBlends(blendShape, sourcePose, children)
+
+        if not skel or not skel.node.exists():
+            return
+
+        applyLocal(self.posesWidget.invisibleRootItem())
+        skeleposerWindow.treeWidget.updateTree()
+
+    def fromJson(self, data): # [[a, [b, c]]] => a | b | c
+        self.posesWidget.fromList(data)
+        self.patternsWidget.fromJson([])
+
+    def toJson(self):
+        return self.posesWidget.toList()
+
+    def saveToSkeleposer(self):
+        if not skel.node.hasAttr("splitPosesData"):
+            skel.node.addAttr("splitPosesData", dt="string")
+        skel.node.splitPosesData.set(json.dumps(self.toJson()))
+
+    def loadFromSkeleposer(self):
+        if skel and skel.node.exists() and skel.node.hasAttr("splitPosesData"):
+            data = json.loads(skel.node.splitPosesData.get() or "")
+            self.fromJson(data)
+        else:
+            self.fromJson([])
+
 class SkeleposerWindow(QFrame):
     def __init__(self, **kwargs):
         super(SkeleposerWindow, self).__init__(**kwargs)
 
         self.setWindowTitle("Skeleposer Editor")
-        self.setGeometry(500,400, 600, 400)
+        self.setGeometry(600,300, 600, 500)
+        centerWindow(self)
         self.setWindowFlags(self.windowFlags() | Qt.Dialog)
 
         layout = QVBoxLayout()
@@ -2007,14 +2326,21 @@ class SkeleposerWindow(QFrame):
         self.jointsListWidget = ListWithFilterWidget()
         self.treeWidget.itemSelectionChanged.connect(self.treeSelectionChanged)
 
+        self.splitPoseWidget = SplitPoseWidget()
+
         hsplitter = WideSplitter(Qt.Horizontal)
         hsplitter.addWidget(self.jointsListWidget)
         hsplitter.addWidget(self.treeWidget)
         hsplitter.setSizes([100, 400])
 
+        vsplitter = WideSplitter(Qt.Vertical)
+        vsplitter.addWidget(hsplitter)
+        vsplitter.addWidget(self.splitPoseWidget)
+        vsplitter.setSizes([500, 100])
+
         layout.addLayout(hlayout)
         layout.addWidget(self.toolsWidget)
-        layout.addWidget(hsplitter)
+        layout.addWidget(vsplitter)
         layout.setStretch(0,0)
         layout.setStretch(1,0)
         layout.setStretch(2,1)
@@ -2057,6 +2383,10 @@ class SkeleposerWindow(QFrame):
         self.treeWidget.updateTree()
         self.skeleposerSelectorWidget.setText(str(node))
         self.toolsWidget.hide()
+
+        self.splitPoseWidget.loadFromSkeleposer()
+
+        clearUnusedRemapValue()       
 
 def undoRedoCallback():
     if not skel or not skel.node.exists():
@@ -2113,6 +2443,8 @@ def undoRedoCallback():
         if (ch.poseIndex is not None and ch.poseIndex in selectedIndices) or\
            (ch.directoryIndex is not None and -ch.directoryIndex in selectedIndices):
             ch.setSelected(True)
+
+    skeleposerWindow.splitPoseWidget.loadFromSkeleposer()
 
 pm.scriptJob(e=["Undo", undoRedoCallback])
 pm.scriptJob(e=["Redo", undoRedoCallback])
