@@ -15,28 +15,28 @@ mayaMainWindow = wrapInstance(int(api.MQtUtil.mainWindow()), QMainWindow)
 
 RootDirectory = os.path.dirname(__file__)
 
-def findSymmetricObject(ctrl, left=True, right=True):
+def findSymmetricName(name, left=True, right=True):
     L_starts = {"L_": "R_", "l_": "r_"}
     L_ends = {"_L": "_R", "_l": "_r"}
 
     R_starts = {"R_": "L_", "r_": "l_"}
     R_ends = {"_R": "_L", "_r": "_l"}
-
+    
     for enable, starts, ends in [(left, L_starts, L_ends), (right, R_starts, R_ends)]:
         if enable:
             for s in starts:
-                if ctrl.startswith(s):
-                    ctrl_mirrored = starts[s] + str(ctrl)[len(s):]
-                    if cmds.objExists(ctrl_mirrored):
-                        return pm.PyNode(ctrl_mirrored)
+                if name.startswith(s):
+                    return starts[s] + name[len(s):]
 
             for s in ends:
-                if ctrl.endswith(s):
-                    ctrl_mirrored = str(ctrl)[:-len(s)] + ends[s]
-                    if cmds.objExists(ctrl_mirrored):
-                        return pm.PyNode(ctrl_mirrored)
+                if name.endswith(s):
+                    return name[:-len(s)] + ends[s]
 
-    return ctrl
+    return name
+
+def findSymmetricObject(ctrl, left=True, right=True):
+    ctrl_mirrored = findSymmetricName(ctrl.name(), left, right)
+    return pm.PyNode(ctrl_mirrored) if cmds.objExists(ctrl_mirrored) else ctrl
 
 def clamp(v, mn=0.0, mx=1.0):
     if v > mx:
@@ -1359,6 +1359,10 @@ class TreeWidget(QTreeWidget):
             mirrorAction.triggered.connect(lambda _=None: self.mirrorItems())
             menu.addAction(mirrorAction)
 
+            mirrorOnOppositeAction = QAction("Mirror on opposite pose", self)
+            mirrorOnOppositeAction.triggered.connect(lambda _=None: self.mirrorItemsOnOppositePose())
+            menu.addAction(mirrorOnOppositeAction)            
+
             flipAction = QAction("Flip\tCTRL-F", self)
             flipAction.triggered.connect(lambda _=None: self.flipItems())
             menu.addAction(flipAction)
@@ -1526,6 +1530,31 @@ class TreeWidget(QTreeWidget):
                 skel.copyPose(self.clipboard["poseIndex"], currentItem.poseIndex, self.clipboard["joints"])
 
     @undoBlock
+    def mirrorItemsOnOppositePose(self, items=None):
+        doUpdateUI = False
+
+        for sel in items or self.selectedItems():
+            if sel.poseIndex is not None:
+                sourcePoseIndex = sel.poseIndex
+                sourcePoseName = sel.text(0)
+
+                destPoseName = findSymmetricName(sourcePoseName)
+                if destPoseName != sourcePoseName:
+                    destPoseIndex = skel.findPoseIndexByName(destPoseName)
+                    if not destPoseIndex:
+                        destPoseIndex = skel.makePose(destPoseName)
+                        doUpdateUI = True
+
+                    skel.copyPose(sourcePoseIndex, destPoseIndex)
+                    skel.flipPose(destPoseIndex)
+
+            elif sel.directoryIndex is not None:
+                self.mirrorItemsOnOppositePose(self.getChildrenRecursively(sel))
+
+        if doUpdateUI:
+            skeleposerWindow.treeWidget.updateTree()
+
+    @undoBlock
     def mirrorItems(self, items=None):
         for sel in items or self.selectedItems():
             if sel.poseIndex is not None:
@@ -1533,7 +1562,6 @@ class TreeWidget(QTreeWidget):
 
             elif sel.directoryIndex is not None:
                 self.mirrorItems(self.getChildrenRecursively(sel))
-
 
     @undoBlock
     def flipItems(self, items=None):
