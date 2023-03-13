@@ -2204,12 +2204,18 @@ class SplitPoseWidget(QWidget):
         applyBtn = QPushButton("Apply")
         applyBtn.clicked.connect(self.apply)
 
+        self.applySelectedWidget = QCheckBox("Apply selected")
+        applyLayout = QHBoxLayout()
+        applyLayout.addWidget(self.applySelectedWidget)
+        applyLayout.addWidget(applyBtn)
+        applyLayout.setStretch(1, 1)
+
         hsplitter.addWidget(self.posesWidget)
         hsplitter.addWidget(self.patternsWidget)
         layout.addWidget(hsplitter)
 
         layout.addLayout(blendLayout)
-        layout.addWidget(applyBtn)
+        layout.addLayout(applyLayout)
 
     def getBlendShapeNode(self):
         ls = pm.ls(sl=True)
@@ -2262,7 +2268,23 @@ class SplitPoseWidget(QWidget):
         if not skel or not skel.node.exists():
             return
 
-        applyLocal(self.posesWidget.invisibleRootItem())
+        if self.applySelectedWidget.isChecked():
+            for item in self.posesWidget.selectedItems():
+                sourceItem = None
+
+                if item.childCount() == 0:
+                    if item.parent():
+                        sourceItem = item.parent()
+                else:
+                    sourceItem = item
+
+                if sourceItem:
+                    sourcePose = sourceItem.text(0)
+                    applyLocal(sourceItem, sourcePose)
+
+        else:
+            applyLocal(self.posesWidget.invisibleRootItem())
+
         skeleposerWindow.treeWidget.updateTree()
 
     def fromJson(self, data): # [[a, [b, c]]] => a | b | c
