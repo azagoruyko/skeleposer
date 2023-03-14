@@ -21,7 +21,7 @@ def findSymmetricName(name, left=True, right=True):
 
     R_starts = {"R_": "L_", "r_": "l_"}
     R_ends = {"_R": "_L", "_r": "_l"}
-    
+
     for enable, starts, ends in [(left, L_starts, L_ends), (right, R_starts, R_ends)]:
         if enable:
             for s in starts:
@@ -1359,13 +1359,13 @@ class TreeWidget(QTreeWidget):
             mirrorAction.triggered.connect(lambda _=None: self.mirrorItems())
             menu.addAction(mirrorAction)
 
-            mirrorOnOppositeAction = QAction("Mirror on opposite pose", self)
-            mirrorOnOppositeAction.triggered.connect(lambda _=None: self.mirrorItemsOnOppositePose())
-            menu.addAction(mirrorOnOppositeAction)            
-
             flipAction = QAction("Flip\tCTRL-F", self)
             flipAction.triggered.connect(lambda _=None: self.flipItems())
             menu.addAction(flipAction)
+
+            flipOnOppositeAction = QAction("Flip on opposite pose", self)
+            flipOnOppositeAction.triggered.connect(lambda _=None: self.flipItemsOnOppositePose())
+            menu.addAction(flipOnOppositeAction)
 
             searchReplaceAction = QAction("Search/Replace\tCTRL-R", self)
             searchReplaceAction.triggered.connect(lambda _=None: self.searchWindow.show())
@@ -1530,7 +1530,7 @@ class TreeWidget(QTreeWidget):
                 skel.copyPose(self.clipboard["poseIndex"], currentItem.poseIndex, self.clipboard["joints"])
 
     @undoBlock
-    def mirrorItemsOnOppositePose(self, items=None):
+    def flipItemsOnOppositePose(self, items=None):
         doUpdateUI = False
 
         for sel in items or self.selectedItems():
@@ -1549,7 +1549,7 @@ class TreeWidget(QTreeWidget):
                     skel.flipPose(destPoseIndex)
 
             elif sel.directoryIndex is not None:
-                self.mirrorItemsOnOppositePose(self.getChildrenRecursively(sel))
+                self.flipItemsOnOppositePose(self.getChildrenRecursively(sel))
 
         if doUpdateUI:
             skeleposerWindow.treeWidget.updateTree()
@@ -2267,7 +2267,7 @@ class SplitPoseWidget(QWidget):
     def patternsItemChanged(self):
         # update all patterns
         for item in self.posesWidget.selectedItems():
-            data = self.patternsWidget.toJson()            
+            data = self.patternsWidget.toJson()
             item.setData(0, Qt.UserRole, data)
 
         self.saveToSkeleposer()
@@ -2436,7 +2436,7 @@ class SkeleposerWindow(QFrame):
 
         self.splitPoseWidget.loadFromSkeleposer()
 
-        clearUnusedRemapValue()       
+        clearUnusedRemapValue()
 
 def undoRedoCallback():
     if not skel or not skel.node.exists():
