@@ -2381,19 +2381,16 @@ class SkeleposerWindow(QFrame):
         hsplitter = WideSplitter(Qt.Horizontal)
         hsplitter.addWidget(self.jointsListWidget)
         hsplitter.addWidget(self.treeWidget)
+        hsplitter.setStretchFactor(1,100)
         hsplitter.setSizes([100, 400])
 
-        vsplitter = WideSplitter(Qt.Vertical)
-        vsplitter.addWidget(hsplitter)
-        vsplitter.addWidget(self.splitPoseWidget)
-        vsplitter.setSizes([500, 100])
+        tabWidget = QTabWidget()
+        tabWidget.addTab(hsplitter, "Pose")
+        tabWidget.addTab(self.splitPoseWidget, "Split")
 
         layout.addLayout(hlayout)
         layout.addWidget(self.toolsWidget)
-        layout.addWidget(vsplitter)
-        layout.setStretch(0,0)
-        layout.setStretch(1,0)
-        layout.setStretch(2,1)
+        layout.addWidget(tabWidget)
 
     def treeSelectionChanged(self):
         joints = []
