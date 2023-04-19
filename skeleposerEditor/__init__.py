@@ -988,6 +988,7 @@ class Skeleposer(object):
         return poses
 
     def setWorldPoses(self, poses):
+        dagPose = self.dagPose()
         for pi in poses:
             blendMode = self.node.poses[pi].poseBlendMode.get()
 
