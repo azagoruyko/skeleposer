@@ -13,6 +13,7 @@ public:
 	static MTypeId typeId;
 
 	static MObject attr_parent1;	
+	static MObject attr_parent1WithoutScale;
 	static MObject attr_translate1;
 	static MObject attr_rotate1X;
 	static MObject attr_rotate1Y;
@@ -26,6 +27,7 @@ public:
 	static MObject attr_offset1;
 
 	static MObject attr_parent2;
+	static MObject attr_parent2WithoutScale;
 	static MObject attr_translate2;
 	static MObject attr_rotate2X;
 	static MObject attr_rotate2Y;

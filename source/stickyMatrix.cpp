@@ -17,7 +17,9 @@ using namespace std;
 MTypeId StickyMatrix::typeId(1274442);
 
 MObject StickyMatrix::attr_parent1;
+MObject StickyMatrix::attr_parent1WithoutScale;
 MObject StickyMatrix::attr_parent2;
+MObject StickyMatrix::attr_parent2WithoutScale;
 MObject StickyMatrix::attr_translate1;
 MObject StickyMatrix::attr_rotate1X;
 MObject StickyMatrix::attr_rotate1Y;
@@ -56,8 +58,18 @@ MStatus StickyMatrix::compute(const MPlug &plug, MDataBlock &dataBlock)
     if (plug != attr_outMatrix1 && plug != attr_outMatrix2)
         return MS::kUnknownParameter;
     
-    const MMatrix parent1 = dataBlock.inputValue(attr_parent1).asMatrix();
-    const MMatrix parent2 = dataBlock.inputValue(attr_parent2).asMatrix();
+    const bool parent1WithoutScale = dataBlock.inputValue(attr_parent1WithoutScale).asBool();
+    const bool parent2WithoutScale = dataBlock.inputValue(attr_parent2WithoutScale).asBool();
+
+    MMatrix parent1 = dataBlock.inputValue(attr_parent1).asMatrix();
+    MMatrix parent2 = dataBlock.inputValue(attr_parent2).asMatrix();
+
+    if (parent1WithoutScale)
+        set_mscale(parent1, MVector(1, 1, 1));
+
+    if (parent2WithoutScale)
+        set_mscale(parent2, MVector(1, 1, 1));
+
     const MVector translate1 = dataBlock.inputValue(attr_translate1).asVector();
     const MVector translate2 = dataBlock.inputValue(attr_translate2).asVector();
     const MVector rotate1 = dataBlock.inputValue(attr_rotate1).asVector();
@@ -149,6 +161,9 @@ MStatus StickyMatrix::initialize()
     mAttr.setHidden(true);
     addAttribute(attr_parent1);
 
+    attr_parent1WithoutScale = nAttr.create("parent1WithoutScale", "p1wos", MFnNumericData::kBoolean, false);
+    addAttribute(attr_parent1WithoutScale);
+
     attr_translate1 = nAttr.create("translate1", "t1", MFnNumericData::k3Double);
     nAttr.setKeyable(true);
     addAttribute(attr_translate1);
@@ -181,6 +196,9 @@ MStatus StickyMatrix::initialize()
     attr_parent2 = mAttr.create("parent2", "p2");
     mAttr.setHidden(true);
     addAttribute(attr_parent2);
+
+    attr_parent2WithoutScale = nAttr.create("parent2WithoutScale", "p2wos", MFnNumericData::kBoolean, false);
+    addAttribute(attr_parent2WithoutScale);
 
     attr_translate2 = nAttr.create("translate2", "t2", MFnNumericData::k3Double);
     nAttr.setKeyable(true);
@@ -251,7 +269,9 @@ MStatus StickyMatrix::initialize()
     addAttribute(attr_outMatrix2);
     
     attributeAffects(attr_parent1, attr_outMatrix1);
+    attributeAffects(attr_parent1WithoutScale, attr_outMatrix1);
     attributeAffects(attr_parent2, attr_outMatrix1);
+    attributeAffects(attr_parent2WithoutScale, attr_outMatrix1);
     attributeAffects(attr_translate1, attr_outMatrix1);
     attributeAffects(attr_translate2, attr_outMatrix1);
     attributeAffects(attr_rotate1, attr_outMatrix1);
@@ -269,7 +289,9 @@ MStatus StickyMatrix::initialize()
     attributeAffects(attr_sphericalLengthFactor, attr_outMatrix1);
 
     attributeAffects(attr_parent1, attr_outMatrix2);
+    attributeAffects(attr_parent1WithoutScale, attr_outMatrix2);
     attributeAffects(attr_parent2, attr_outMatrix2);
+    attributeAffects(attr_parent2WithoutScale, attr_outMatrix2);
     attributeAffects(attr_translate1, attr_outMatrix2);
     attributeAffects(attr_translate2, attr_outMatrix2);
     attributeAffects(attr_rotate1, attr_outMatrix2);

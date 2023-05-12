@@ -1,3 +1,8 @@
+import re
+import os
+import json
+from contextlib import contextmanager
+
 from PySide2.QtGui import *
 from PySide2.QtCore import *
 from PySide2.QtWidgets import *
@@ -6,9 +11,6 @@ import maya.api.OpenMaya as om
 import pymel.core as pm
 import pymel.api as api
 import maya.cmds as cmds
-import re
-import os
-import json
 
 from shiboken2 import wrapInstance
 mayaMainWindow = wrapInstance(int(api.MQtUtil.mainWindow()), QMainWindow)
@@ -967,37 +969,54 @@ class Skeleposer(object):
                     remapValue.value[i].set(pnt[0], pnt[1], 1) # linear interpolation
 
     def getWorldPoses(self, joints=None):
-        self.node.directories[0].directoryWeight.set(0)
-
         dagPose = self.dagPose()
 
-        poses = {}
+        # cache joints matrices
+        jointsData = {}
+        for j in self.getJoints():
+            idx = self.getJointIndex(j)
+            
+            bmat = dagPose_getWorldMatrix(dagPose, j)
+            pmat = dagPose_getParentMatrix(dagPose, j)            
+            jointsData[idx] = {"joint":j, "baseMatrix":bmat, "parentMatrix":pmat}
+
+        data = {}
         for pose in self.node.poses:
             blendMode = pose.poseBlendMode.get()
 
-            poses[pose.index()] = {}
+            deltas = {}
             for delta in pose.poseDeltaMatrices:
-                j = self.getJointByIndex(delta.index())
+                jdata = jointsData[delta.index()]
 
-                if not joints or j in joints or j.name() in joints:
-                    bmat = dagPose_getWorldMatrix(dagPose, j)
-                    pmat = dagPose_getParentMatrix(dagPose, j)
-                    poses[pose.index()][delta.index()] = applyDelta(delta.get(), bmat, pmat, blendMode)
+                if not joints or jdata["joint"] in joints:
+                    wm = applyDelta(delta.get(), jdata["baseMatrix"], jdata["parentMatrix"], blendMode)
+                    deltas[delta.index()] = wm.tolist()
+            
+            if deltas:
+                data[pose.index()] = deltas
 
-        self.node.directories[0].directoryWeight.set(1)
-        return poses
+        return data
 
     def setWorldPoses(self, poses):
         dagPose = self.dagPose()
+
+        # cache joints matrices
+        jointsData = {}
+        for j in self.getJoints():
+            idx = self.getJointIndex(j)
+            
+            bmat = dagPose_getWorldMatrix(dagPose, j)
+            pmat = dagPose_getParentMatrix(dagPose, j)            
+            jointsData[idx] = {"joint":j, "baseMatrix":bmat, "parentMatrix":pmat}
+
         for pi in poses:
             blendMode = self.node.poses[pi].poseBlendMode.get()
 
             for di in poses[pi]:
-                j = self.getJointByIndex(di)
-                bmat = dagPose_getWorldMatrix(dagPose, j)
-                pmat = dagPose_getParentMatrix(dagPose, j)
-                self.node.poses[pi].poseDeltaMatrices[di].set(getDelta(poses[pi][di], bmat, pmat, blendMode))
-
+                jdata = jointsData[di]
+                delta = getDelta(pm.dt.Matrix(poses[pi][di]), jdata["baseMatrix"], jdata["parentMatrix"], blendMode)
+                self.node.poses[pi].poseDeltaMatrices[di].set(delta)
+                
 ####################################################################################
 
 @undoBlock
@@ -1211,10 +1230,7 @@ class TreeWidget(QTreeWidget):
         self.searchWindow.replaceClicked.connect(self.searchAndReplace)
 
         self.setHeaderLabels(["Name", "Value", "Edit", "Driver"])
-        if "setSectionResizeMode" in dir(self.header()):
-            self.header().setSectionResizeMode(QHeaderView.ResizeToContents) # Qt5
-        else:
-            self.header().setResizeMode(QHeaderView.ResizeToContents) # Qt4
+        self.header().setSectionResizeMode(QHeaderView.ResizeToContents) # Qt5
 
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDragEnabled(True)
@@ -1241,6 +1257,31 @@ class TreeWidget(QTreeWidget):
 
         for ch in self.getChildrenRecursively(self.invisibleRootItem()):
             setItemWidgets(ch)
+
+    @contextmanager
+    def keepState(self):
+        selectedIndices = [] # poses > 0, directories < 0
+        for sel in self.selectedItems():
+            if sel.poseIndex is not None:
+                selectedIndices.append(sel.poseIndex)
+            elif sel.directoryIndex is not None:
+                selectedIndices.append(-sel.directoryIndex)
+
+        expanded = {}
+        for ch in self.getChildrenRecursively(self.invisibleRootItem(), pose=False):
+            expanded[ch.directoryIndex] = ch.isExpanded()
+
+        yield
+
+        for ch in self.getChildrenRecursively(self.invisibleRootItem()):
+            setItemWidgets(ch)
+
+            if ch.directoryIndex in expanded:
+                ch.setExpanded(expanded[ch.directoryIndex])
+
+            if (ch.poseIndex is not None and ch.poseIndex in selectedIndices) or\
+            (ch.directoryIndex is not None and -ch.directoryIndex in selectedIndices):
+                ch.setSelected(True)
 
     def keyPressEvent(self, event):
         shift = event.modifiers() & Qt.ShiftModifier
@@ -1420,16 +1461,16 @@ class TreeWidget(QTreeWidget):
         updateBaseAction.triggered.connect(lambda _=None: skel.updateBaseMatrices())
         menu.addAction(updateBaseAction)
 
-        importExportMenu = QMenu("Import/Export", self)
-        importAction = QAction("Import", self)
-        importAction.triggered.connect(lambda _=None: self.importSkeleposer())
-        importExportMenu.addAction(importAction)
+        fileMenu = QMenu("File", self)
+        saveAction = QAction("Save", self)
+        saveAction.triggered.connect(lambda _=None: self.saveSkeleposer())
+        fileMenu.addAction(saveAction)
 
-        exportAction = QAction("Export", self)
-        exportAction.triggered.connect(lambda _=None: self.exportSkeleposer())
-        importExportMenu.addAction(exportAction)
+        loadAction = QAction("Load", self)
+        loadAction.triggered.connect(lambda _=None: self.loadSkeleposer())
+        fileMenu.addAction(loadAction)
 
-        menu.addMenu(importExportMenu)
+        menu.addMenu(fileMenu)
 
         selectNodeAction = QAction("Select node", self)
         selectNodeAction.triggered.connect(lambda _=None: pm.select(skel.node))
@@ -1437,7 +1478,7 @@ class TreeWidget(QTreeWidget):
 
         menu.popup(event.globalPos())
 
-    def importSkeleposer(self):
+    def loadSkeleposer(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import skeleposer", "", "*.json")
         if path:
             with open(path, "r") as f:
@@ -1445,7 +1486,7 @@ class TreeWidget(QTreeWidget):
             skel.fromJson(data)
             self.updateTree()
 
-    def exportSkeleposer(self):
+    def saveSkeleposer(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export skeleposer", "", "*.json")
         if path:
             with open(path, "w") as f:
@@ -1647,7 +1688,8 @@ class TreeWidget(QTreeWidget):
     def getValidParent(self):
         selectedItems = self.selectedItems()
         if selectedItems:
-            return selectedItems[-1].parent()
+            last = selectedItems[-1]
+            return last if last.directoryIndex is not None else last.parent()
 
     def makePose(self, name="Pose", parent=None):
         idx = skel.makePose(name)
@@ -2314,7 +2356,8 @@ class SplitPoseWidget(QWidget):
         else:
             applyLocal(self.posesWidget.invisibleRootItem())
 
-        skeleposerWindow.treeWidget.updateTree()
+        with skeleposerWindow.treeWidget.keepState():
+            skeleposerWindow.treeWidget.updateTree()
 
     def fromJson(self, data): # [[a, [b, c]]] => a | b | c
         self.posesWidget.fromList(data)
@@ -2466,31 +2509,10 @@ def undoRedoCallback():
     if getItemsState() == getSkeleposerState():
         return
 
-    selectedIndices = [] # poses > 0, directories < 0
-    for sel in tree.selectedItems():
-        if sel.poseIndex is not None:
-            selectedIndices.append(sel.poseIndex)
-        elif sel.directoryIndex is not None:
-            selectedIndices.append(-sel.directoryIndex)
-
-    print("SkeleposerEditor undo")
-
-    expanded = {}
-    for ch in tree.getChildrenRecursively(tree.invisibleRootItem(), pose=False):
-        expanded[ch.directoryIndex] = ch.isExpanded()
-
-    tree.clear()
-    tree.addItemsFromSkeleposerData(tree.invisibleRootItem(), skel.getDirectoryData())
-
-    for ch in tree.getChildrenRecursively(tree.invisibleRootItem()):
-        setItemWidgets(ch)
-
-        if ch.directoryIndex in expanded:
-            ch.setExpanded(expanded[ch.directoryIndex])
-
-        if (ch.poseIndex is not None and ch.poseIndex in selectedIndices) or\
-           (ch.directoryIndex is not None and -ch.directoryIndex in selectedIndices):
-            ch.setSelected(True)
+    with tree.keepState():
+        print("SkeleposerEditor undo")
+        tree.clear()
+        tree.addItemsFromSkeleposerData(tree.invisibleRootItem(), skel.getDirectoryData())
 
     skeleposerWindow.splitPoseWidget.loadFromSkeleposer()
 
