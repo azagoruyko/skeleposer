@@ -246,6 +246,23 @@ def getBlendShapeTargetDelta(blendShape, targetIndex):
 
     return targetIndices, targetDeltas
 
+def matchJoint(j, name=None):
+    newj = pm.createNode("joint", n=name or j.name())
+    pm.xform(newj, ws=True, m=pm.xform(j, q=True, ws=True, m=True))
+    newj.setOrientation(newj.getOrientation()*newj.getRotation().asQuaternion()) # freeze
+    newj.setRotation([0,0,0])
+    return newj
+
+def transferSkin(src, dest):
+    for p in src.wm.outputs(p=True, type="skinCluster"):
+        dest.wm >> p
+        
+        if not dest.hasAttr("lockInfluenceWeights"):
+            dest.addAttr("lockInfluenceWeights", at="bool", dv=False)
+
+        dest.lockInfluenceWeights >> p.node().lockWeights[p.index()]                
+        #p.node().bindPreMatrix[p.index()].set(dest.wim.get())
+
 class Skeleposer(object):
     TrackAttrs = ["t","tx","ty","tz","r","rx","ry","rz","s","sx","sy","sz"]
 
@@ -673,6 +690,7 @@ class Skeleposer(object):
 
         self.node.connectionData.set("{}")
 
+    @undoBlock
     def beginEditPose(self, idx):
         if self._editPoseData:
             pm.warning("Already in edit mode")
@@ -697,6 +715,7 @@ class Skeleposer(object):
 
         self.disconnectOutputs()
 
+    @undoBlock
     def endEditPose(self):
         if not self._editPoseData:
             pm.warning("Not in edit mode")
@@ -752,6 +771,7 @@ class Skeleposer(object):
                 data["children"].append(self.getDirectoryData(-chIdx))
         return data
 
+    @undoBlock
     def addSplitPose(self, srcPoseName, destPoseName, **kwargs): # addSplitPose("brows_up", "L_brow_up_inner", R_=0, M_=0.5, L_brow_2=0.3, L_brow_3=0, L_brow_4=0)
         srcPose = None
         destPose = None
@@ -787,6 +807,7 @@ class Skeleposer(object):
                     else:
                         pm.removeMultiInstance(pdm, b=True)
 
+    @undoBlock
     def addSplitBlends(self, blendShape, targetName, poses):
         blendShape = pm.PyNode(blendShape)
 
@@ -865,6 +886,43 @@ class Skeleposer(object):
 
             blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputPointsTarget.set(len(targetDeltas), *targetDeltas, type="pointArray")
             blendShape.inputTarget[0].inputTargetGroup[poseTargetIndex].inputTargetItem[6000].inputComponentsTarget.set(len(targetComponents), *targetComponents, type="componentList")
+
+    @undoBlock
+    def addJointsAsLayer(self, rootJoint, shouldTransferSkin=True):
+        rootJoint = pm.PyNode(rootJoint)
+        joints = [rootJoint] + rootJoint.listRelatives(type="joint", ad=True, c=True)
+
+        skelJoints = {j: matchJoint(j) for j in joints}
+
+        # set corresponding parents
+        for j in skelJoints:
+            parent = j.getParent()
+            if parent in skelJoints:
+                skelJoints[parent] | skelJoints[j] 
+
+        if rootJoint.getParent():
+            rootLocalName = rootJoint.name().split("|")[-1]
+            grp = pm.createNode("transform", n=rootLocalName + "_parent_transform")
+            pm.parentConstraint(rootJoint.getParent(), grp)
+            grp | skelJoints[rootJoint]
+
+        self.addJoints(skelJoints.values())
+
+        # set base matrices
+        for old, new in skelJoints.items():
+            idx = self.getJointIndex(new)
+            old.m >> self.node.baseMatrices[idx]
+
+            if shouldTransferSkin:
+                transferSkin(old, new)
+
+        # update skin clusters
+        if shouldTransferSkin:
+            skinClusters = pm.ls(type="skinCluster")
+            if skinClusters:
+                pm.dgdirty(skinClusters)
+
+        return skelJoints[rootJoint]
 
     def toJson(self):
         data = {"joints":{}, "baseMatrices":{}, "poses": {}, "directories": {}}
@@ -997,6 +1055,7 @@ class Skeleposer(object):
 
         return data
 
+    @undoBlock
     def setWorldPoses(self, poses):
         dagPose = self.dagPose()
 
@@ -1107,11 +1166,11 @@ def updateItemVisuals(item):
     if item.poseIndex is not None:
         enabled = skel.node.poses[item.poseIndex].poseEnabled.get()
         blendMode = skel.node.poses[item.poseIndex].poseBlendMode.get()
-        if blendMode == 0:
+        if blendMode == 0: # relative
             item.setBackground(0, QTreeWidgetItem().background(0))
             item.setForeground(0, QColor(200, 200, 200) if enabled else QColor(110, 110,110))
 
-        elif blendMode == 1:
+        elif blendMode == 1: # replace
             item.setBackground(0, QColor(140,140,200) if enabled else QColor(50,50,90))
             item.setForeground(0, QColor(0,0,0) if enabled else QColor(110, 110, 110))
 
@@ -1537,6 +1596,8 @@ class TreeWidget(QTreeWidget):
 
     def collapseOthers(self):
         selectedItems = self.selectedItems()
+        if not selectedItems:
+            return
 
         allParents = []
         for sel in selectedItems:
@@ -1549,10 +1610,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def groupSelected(self):
-        selectedItems = self.selectedItems()
         dirItem = self.makeDirectory(parent=self.getValidParent())
 
-        for sel in selectedItems:
+        for sel in self.selectedItems():
             (sel.parent() or self.invisibleRootItem()).removeChild(sel)
             dirItem.addChild(sel)
             self.treeItemChanged(sel)
@@ -1573,9 +1633,13 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def flipItemsOnOppositePose(self, items=None):
+        selectedItems = self.selectedItems()
+        if not selectedItems and not items:
+            return
+
         doUpdateUI = False
 
-        for sel in items or self.selectedItems():
+        for sel in items or selectedItems:
             if sel.poseIndex is not None:
                 sourcePoseIndex = sel.poseIndex
                 sourcePoseName = sel.text(0)
@@ -1665,25 +1729,25 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def addCorrectivePose(self):
-        indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None]
-        names = [item.text(0) for item in self.selectedItems() if item.poseIndex is not None]
+        selectedItems = self.selectedItems()
+        if selectedItems:
+            indices = [item.poseIndex for item in selectedItems if item.poseIndex is not None]
+            names = [item.text(0) for item in selectedItems if item.poseIndex is not None]
 
-        item = self.makePose("_".join(names)+"_correct", self.getValidParent())
-        skel.makeCorrectNode(item.poseIndex, indices)
-        setItemWidgets(item)
+            item = self.makePose("_".join(names)+"_correct", self.getValidParent())
+            skel.makeCorrectNode(item.poseIndex, indices)
+            setItemWidgets(item)
 
     @undoBlock
     def removeItems(self):
-        ok = QMessageBox.question(self, "Skeleposer Editor", "Really remove?", QMessageBox.Yes and QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
-        if ok:
-            for item in self.selectedItems():
-                if item.directoryIndex is not None: # remove directory
-                    skel.removeDirectory(item.directoryIndex)
-                    (item.parent() or self.invisibleRootItem()).removeChild(item)
+        for item in self.selectedItems():
+            if item.directoryIndex is not None: # remove directory
+                skel.removeDirectory(item.directoryIndex)
+                (item.parent() or self.invisibleRootItem()).removeChild(item)
 
-                elif item.poseIndex is not None:
-                    skel.removePose(item.poseIndex)
-                    (item.parent() or self.invisibleRootItem()).removeChild(item)
+            elif item.poseIndex is not None:
+                skel.removePose(item.poseIndex)
+                (item.parent() or self.invisibleRootItem()).removeChild(item)
 
     def getValidParent(self):
         selectedItems = self.selectedItems()
@@ -1750,34 +1814,6 @@ class TreeWidget(QTreeWidget):
             if item.directoryIndex is not None: # update widgets for all children
                 for ch in self.getChildrenRecursively(item):
                     setItemWidgets(ch)
-
-class SkeleposerSelectorWidget(QLineEdit):
-    nodeChanged = Signal(str)
-
-    def __init__(self, **kwargs):
-        super(SkeleposerSelectorWidget, self).__init__(**kwargs)
-
-        self.setReadOnly(True)
-
-    def contextMenuEvent(self, event):
-        menu = QMenu(self)
-        for n in pm.ls(type="skeleposer"):
-            action = QAction(n.name(), self)
-            action.triggered.connect(lambda _=None, name=n.name(): self.nodeChanged.emit(name))
-            menu.addAction(action)
-
-        menu.popup(event.globalPos())
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() in [Qt.LeftButton]:
-            oldName = self.text()
-            if pm.objExists(oldName):
-                newName, ok = QInputDialog.getText(None, "Skeleposer", "New name", QLineEdit.Normal, oldName)
-                if ok:
-                    pm.rename(oldName, newName)
-                    self.setText(skel.node.name())
-        else:
-            super(SkeleposerSelectorWidget, self).mouseDoubleClickEvent(event)
 
 class BlendSliderWidget(QWidget):
     valueChanged = Signal(float)
@@ -2378,6 +2414,33 @@ class SplitPoseWidget(QWidget):
         else:
             self.fromJson([])
 
+class SkeleposerSelectorWidget(QLineEdit):
+    nodeChanged = Signal(str)
+
+    def __init__(self, **kwargs):
+        super(SkeleposerSelectorWidget, self).__init__(**kwargs)
+        self.setPlaceholderText("Your skeleposer here")
+        self.setReadOnly(True)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        for n in cmds.ls(type="skeleposer"):
+            action = QAction(n, self)
+            action.triggered.connect(lambda _=None, name=n: self.nodeChanged.emit(name))
+            menu.addAction(action)
+        menu.popup(event.globalPos())
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() in [Qt.LeftButton]:
+            oldName = self.text()
+            if pm.objExists(oldName):
+                newName, ok = QInputDialog.getText(None, "Skeleposer", "New name", QLineEdit.Normal, oldName)
+                if ok:
+                    pm.rename(oldName, newName)
+                    self.setText(skel.node.name())
+        else:
+            super(SkeleposerSelectorWidget, self).mouseDoubleClickEvent(event)
+
 class SkeleposerWindow(QFrame):
     def __init__(self, **kwargs):
         super(SkeleposerWindow, self).__init__(**kwargs)
@@ -2393,25 +2456,29 @@ class SkeleposerWindow(QFrame):
         self.skeleposerSelectorWidget = SkeleposerSelectorWidget()
         self.skeleposerSelectorWidget.nodeChanged.connect(self.selectSkeleposer)
 
-        newBtn = QPushButton("New")
+        newBtn = QPushButton()
+        newBtn.setIcon(QIcon(RootDirectory+"/icons/new.png"))        
         newBtn.clicked.connect(self.newNode)
 
-        addJointsBtn = QPushButton("Add joints")
+        addJointsBtn = QPushButton()
+        addJointsBtn.setIcon(QIcon(RootDirectory+"/icons/add.png"))
         addJointsBtn.clicked.connect(self.addJoints)
 
-        removeJointsBtn = QPushButton("Remove joints")
+        removeJointsBtn = QPushButton()
+        removeJointsBtn.setIcon(QIcon(RootDirectory+"/icons/remove.png"))
         removeJointsBtn.clicked.connect(self.removeJoints)
 
-        selectJointsBtn = QPushButton("Select joints")
-        selectJointsBtn.clicked.connect(self.selectJoints)
+        optionsBtn = QPushButton()
+        optionsBtn.setIcon(QIcon(RootDirectory+"/icons/gear.png"))
+        optionsBtn.contextMenuEvent = self.optionsContextMenuEvent
+        optionsBtn.clicked.connect(self.optionsClicked)
 
         hlayout = QHBoxLayout()
-        hlayout.addWidget(QLabel("Current skeleposer"))
-        hlayout.addWidget(self.skeleposerSelectorWidget)
         hlayout.addWidget(newBtn)
+        hlayout.addWidget(self.skeleposerSelectorWidget)
         hlayout.addWidget(addJointsBtn)
         hlayout.addWidget(removeJointsBtn)
-        hlayout.addWidget(selectJointsBtn)
+        hlayout.addWidget(optionsBtn)
 
         self.treeWidget = TreeWidget()
         self.toolsWidget = ToolsWidget()
@@ -2436,6 +2503,29 @@ class SkeleposerWindow(QFrame):
         layout.addWidget(self.toolsWidget)
         layout.addWidget(tabWidget)
 
+    def optionsClicked(self):
+        QMessageBox.information(None, "Skeleposer Editor", "Use context menu here")
+
+    def optionsContextMenuEvent(self, event):
+        menu = QMenu(self)
+
+        if skel:
+            addAsLayerAction = QAction("Add selected as layer", self)
+            addAsLayerAction.triggered.connect(lambda _=None: self.addJointsAsLayer())
+            menu.addAction(addAsLayerAction)
+
+        else:
+            pm.warning("Select skeleposer first")
+
+        menu.popup(event.globalPos())
+
+    def addJointsAsLayer(self):
+        ls = pm.ls(sl=True, type=["joint", "transform"])
+        if ls:
+            skel.addJointsAsLayer(ls[0])
+        else:
+            pm.warning("Select root joint to add as a layer")
+
     def treeSelectionChanged(self):
         joints = []
         for sel in self.treeWidget.selectedItems():
@@ -2449,21 +2539,23 @@ class SkeleposerWindow(QFrame):
         self.jointsListWidget.addItems(sorted(poseJoints), bold=True) # pose joints
         self.jointsListWidget.addItems(sorted(allJoints-poseJoints), foreground=QColor(100, 100, 100)) # all joints
 
-    def selectJoints(self):
-        if skel:
-            pm.select(skel.getJoints())
-
     @undoBlock
     def addJoints(self):
         if skel:
-            skel.addJoints(pm.ls(sl=True, type=["joint", "transform"]))
+            ls = pm.ls(sl=True, type=["joint", "transform"])        
+            if ls:
+                skel.addJoints(ls)
+            else:
+                pm.warning("Select joints to add")
 
     @undoBlock
     def removeJoints(self):
         if skel:
-            ok = QMessageBox.question(self, "Skeleposer Editor", "Really remove selected joints?", QMessageBox.Yes and QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
-            if ok:
-                skel.removeJoints(pm.ls(sl=True, type=["joint", "transform"]))
+            ls = pm.ls(sl=True, type=["joint", "transform"])
+            if ls:
+                skel.removeJoints(ls)
+            else:
+                pm.warning("Select joints to remove")
 
     def newNode(self):
         self.selectSkeleposer(pm.createNode("skeleposer"))
