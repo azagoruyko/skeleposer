@@ -4,7 +4,8 @@ What is Skeleposer? <br>
 
 Briefly, it's like Shape Editor in Maya, but works with transforms and joints. It can be used to make complex facial rigs based on joints. It's especially good for game engines and realtime graphics. 
 
-![image](https://github.com/azagoruyko/skeleposer/assets/9614751/b53c00a7-438a-4251-a2c8-421897e2f250)
+![image](https://github.com/azagoruyko/skeleposer/assets/9614751/c5b0a40a-a09e-4fd6-8dc4-8363d2bd21f8)
+
 
 Youtube: https://www.youtube.com/watch?v=yBulcW3-WS4
 
