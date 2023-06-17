@@ -2419,7 +2419,7 @@ class SkeleposerSelectorWidget(QLineEdit):
 
     def __init__(self, **kwargs):
         super(SkeleposerSelectorWidget, self).__init__(**kwargs)
-        self.setPlaceholderText("Your skeleposer here")
+        self.setPlaceholderText("Right click to select skeleposer from scene")
         self.setReadOnly(True)
 
     def contextMenuEvent(self, event):
@@ -2458,27 +2458,30 @@ class SkeleposerWindow(QFrame):
 
         newBtn = QPushButton()
         newBtn.setIcon(QIcon(RootDirectory+"/icons/new.png"))        
+        newBtn.setToolTip("New skeleposer")
         newBtn.clicked.connect(self.newNode)
 
         addJointsBtn = QPushButton()
         addJointsBtn.setIcon(QIcon(RootDirectory+"/icons/add.png"))
+        addJointsBtn.setToolTip("Add joints to skeleposer")
         addJointsBtn.clicked.connect(self.addJoints)
 
         removeJointsBtn = QPushButton()
         removeJointsBtn.setIcon(QIcon(RootDirectory+"/icons/remove.png"))
+        removeJointsBtn.setToolTip("Remove joints from skeleposer")
         removeJointsBtn.clicked.connect(self.removeJoints)
 
-        optionsBtn = QPushButton()
-        optionsBtn.setIcon(QIcon(RootDirectory+"/icons/gear.png"))
-        optionsBtn.contextMenuEvent = self.optionsContextMenuEvent
-        optionsBtn.clicked.connect(self.optionsClicked)
+        addLayerBtn = QPushButton()
+        addLayerBtn.setIcon(QIcon(RootDirectory+"/icons/layer.png"))
+        addLayerBtn.setToolTip("Add joint hierarchy as layer")
+        addLayerBtn.clicked.connect(self.addJointsAsLayer)
 
         hlayout = QHBoxLayout()
         hlayout.addWidget(newBtn)
         hlayout.addWidget(self.skeleposerSelectorWidget)
         hlayout.addWidget(addJointsBtn)
         hlayout.addWidget(removeJointsBtn)
-        hlayout.addWidget(optionsBtn)
+        hlayout.addWidget(addLayerBtn)
 
         self.treeWidget = TreeWidget()
         self.toolsWidget = ToolsWidget()
@@ -2502,22 +2505,6 @@ class SkeleposerWindow(QFrame):
         layout.addLayout(hlayout)
         layout.addWidget(self.toolsWidget)
         layout.addWidget(tabWidget)
-
-    def optionsClicked(self):
-        QMessageBox.information(None, "Skeleposer Editor", "Use context menu here")
-
-    def optionsContextMenuEvent(self, event):
-        menu = QMenu(self)
-
-        if skel:
-            addAsLayerAction = QAction("Add selected as layer", self)
-            addAsLayerAction.triggered.connect(lambda _=None: self.addJointsAsLayer())
-            menu.addAction(addAsLayerAction)
-
-        else:
-            pm.warning("Select skeleposer first")
-
-        menu.popup(event.globalPos())
 
     def addJointsAsLayer(self):
         ls = pm.ls(sl=True, type=["joint", "transform"])

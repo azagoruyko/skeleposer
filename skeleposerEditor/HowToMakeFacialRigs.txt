@@ -1,0 +1,28 @@
+How to make facial rigs with Skeleposer.
+
+Each skeleposer's joint's hierarchy should be like this:
+
+   joint  # skeleposer joint
+      minor_joint  # controlled by a constraint and a scale from a minor control
+ 
+   control_null # controlled by a constraint from the joint above
+      control  # controls minor_joint above
+
+Make left joints global oriented. It's easier to work with.
+
+head_joint
+  upper-head-joints  # brows, eyes, cheeks
+  head_lower_squash_joint # used for stretching/squashing
+     M_jaw_joint
+     M_teeth_upper_joint
+     M_teeth_lower_joint
+     M_mouth_joint  # controlled by M_mouth_control
+       M_lip_upper_base_joint # skeleposer joint
+          M_lip_upper_base_minor_joint # controlled by an upper lip control
+             M_lip_upper_joint  # skeleposer upper lip joints
+               M_lip_upper_minor_joint # controlled by a minor control
+             L_lip_upper_1_joint
+               L_lip_upper_1_minor_joint
+             ...
+
+Right controls should have sx=-1.
