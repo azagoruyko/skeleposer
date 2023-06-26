@@ -2445,6 +2445,8 @@ class SkeleposerWindow(QFrame):
     def __init__(self, **kwargs):
         super(SkeleposerWindow, self).__init__(**kwargs)
 
+        self._callbacks = []
+
         self.setWindowTitle("Skeleposer Editor")
         self.setGeometry(600,300, 600, 500)
         centerWindow(self)
@@ -2549,14 +2551,39 @@ class SkeleposerWindow(QFrame):
 
     def selectSkeleposer(self, node):
         global skel
-        skel = Skeleposer(node)
-        self.treeWidget.updateTree()
-        self.skeleposerSelectorWidget.setText(str(node))
+        if node:
+            skel = Skeleposer(node)
+            self.treeWidget.updateTree()
+            self.skeleposerSelectorWidget.setText(str(node))
+
+            self.splitPoseWidget.loadFromSkeleposer()
+
+            self.registerCallbacks()
+            pm.select(node)
+        else:
+            skel = None
+            self.skeleposerSelectorWidget.setText("")
+            self.treeWidget.clear()
+            self.deregisterCallbacks()
+
         self.toolsWidget.hide()
-
-        self.splitPoseWidget.loadFromSkeleposer()
-
         clearUnusedRemapValue()
+
+    def registerCallbacks(self):
+        def preRemovalCallback(node, clientData):
+            self.selectSkeleposer(None)
+        def nameChangedCallback(node, name, clientData):
+            self.skeleposerSelectorWidget.setText(skel.node.name())
+
+        self.deregisterCallbacks()
+        nodeObject = skel.node.__apimobject__()
+        self._callbacks.append( pm.api.MNodeMessage.addNodePreRemovalCallback(nodeObject, preRemovalCallback) )
+        self._callbacks.append( pm.api.MNodeMessage.addNameChangedCallback(nodeObject, nameChangedCallback) )
+
+    def deregisterCallbacks(self):
+        for cb in self._callbacks:            
+            pm.api.MMessage.removeCallback(cb)
+        self._callbacks = []            
 
 def undoRedoCallback():
     if not skel or not skel.node.exists():
