@@ -256,11 +256,11 @@ def matchJoint(j, name=None):
 def transferSkin(src, dest):
     for p in src.wm.outputs(p=True, type="skinCluster"):
         dest.wm >> p
-        
+
         if not dest.hasAttr("lockInfluenceWeights"):
             dest.addAttr("lockInfluenceWeights", at="bool", dv=False)
 
-        dest.lockInfluenceWeights >> p.node().lockWeights[p.index()]                
+        dest.lockInfluenceWeights >> p.node().lockWeights[p.index()]
         #p.node().bindPreMatrix[p.index()].set(dest.wim.get())
 
 class Skeleposer(object):
@@ -898,7 +898,7 @@ class Skeleposer(object):
         for j in skelJoints:
             parent = j.getParent()
             if parent in skelJoints:
-                skelJoints[parent] | skelJoints[j] 
+                skelJoints[parent] | skelJoints[j]
 
         if rootJoint.getParent():
             rootLocalName = rootJoint.name().split("|")[-1]
@@ -1033,9 +1033,9 @@ class Skeleposer(object):
         jointsData = {}
         for j in self.getJoints():
             idx = self.getJointIndex(j)
-            
+
             bmat = dagPose_getWorldMatrix(dagPose, j)
-            pmat = dagPose_getParentMatrix(dagPose, j)            
+            pmat = dagPose_getParentMatrix(dagPose, j)
             jointsData[idx] = {"joint":j, "baseMatrix":bmat, "parentMatrix":pmat}
 
         data = {}
@@ -1049,7 +1049,7 @@ class Skeleposer(object):
                 if not joints or jdata["joint"] in joints:
                     wm = applyDelta(delta.get(), jdata["baseMatrix"], jdata["parentMatrix"], blendMode)
                     deltas[delta.index()] = wm.tolist()
-            
+
             if deltas:
                 data[pose.index()] = deltas
 
@@ -1063,9 +1063,9 @@ class Skeleposer(object):
         jointsData = {}
         for j in self.getJoints():
             idx = self.getJointIndex(j)
-            
+
             bmat = dagPose_getWorldMatrix(dagPose, j)
-            pmat = dagPose_getParentMatrix(dagPose, j)            
+            pmat = dagPose_getParentMatrix(dagPose, j)
             jointsData[idx] = {"joint":j, "baseMatrix":bmat, "parentMatrix":pmat}
 
         for pi in poses:
@@ -1075,7 +1075,7 @@ class Skeleposer(object):
                 jdata = jointsData[di]
                 delta = getDelta(pm.dt.Matrix(poses[pi][di]), jdata["baseMatrix"], jdata["parentMatrix"], blendMode)
                 self.node.poses[pi].poseDeltaMatrices[di].set(delta)
-                
+
 ####################################################################################
 
 @undoBlock
@@ -2353,8 +2353,10 @@ class SplitPoseWidget(QWidget):
 
     @undoBlock
     def apply(self):
-        def applyLocal(item, sourcePose=None):
-            children = []
+        blendShape = self.blendShapeWidget.text()
+        applySelected = self.applySelectedWidget.isChecked()
+
+        def splitPoses(item, sourcePose=None):
             for i in range(item.childCount()):
                 ch = item.child(i)
                 destPose = ch.text(0)
@@ -2364,33 +2366,38 @@ class SplitPoseWidget(QWidget):
                     print("Split pose '{}'' into '{}' with {}".format(sourcePose, destPose, str(data)))
                     skel.addSplitPose(sourcePose, destPose, **data)
 
-                applyLocal(ch, destPose)
-                children.append(destPose)
+                splitPoses(ch, destPose)
 
-            blendShape = self.blendShapeWidget.text()
-            if pm.objExists(blendShape) and sourcePose and children:
+        def splitBlends(item, sourcePose=None):
+            children = []
+            for i in range(item.childCount()):
+                children.append(item.child(i).text(0))
+
+            if sourcePose and children:
                 print("Split blend '{}' into '{}'".format(sourcePose, " ".join(children)))
                 skel.addSplitBlends(blendShape, sourcePose, children)
+
+            for i in range(item.childCount()):
+                ch = item.child(i)
+                splitBlends(ch, ch.text(0))
 
         if not skel or not skel.node.exists():
             return
 
-        if self.applySelectedWidget.isChecked():
+        if applySelected:
             for item in self.posesWidget.selectedItems():
-                sourceItem = None
+                sourceItem = item.parent() or item
 
-                if item.childCount() == 0:
-                    if item.parent():
-                        sourceItem = item.parent()
-                else:
-                    sourceItem = item
-
-                if sourceItem:
-                    sourcePose = sourceItem.text(0)
-                    applyLocal(sourceItem, sourcePose)
+                sourcePose = sourceItem.text(0)
+                splitPoses(sourceItem, sourcePose)
+                if pm.objExists(blendShape):
+                    splitBlends(sourceItem, sourcePose)
 
         else:
-            applyLocal(self.posesWidget.invisibleRootItem())
+            rootItem = self.posesWidget.invisibleRootItem()
+            splitPoses(rootItem)
+            if pm.objExists(blendShape):
+                splitBlends(rootItem)
 
         with skeleposerWindow.treeWidget.keepState():
             skeleposerWindow.treeWidget.updateTree()
@@ -2459,7 +2466,7 @@ class SkeleposerWindow(QFrame):
         self.skeleposerSelectorWidget.nodeChanged.connect(self.selectSkeleposer)
 
         newBtn = QPushButton()
-        newBtn.setIcon(QIcon(RootDirectory+"/icons/new.png"))        
+        newBtn.setIcon(QIcon(RootDirectory+"/icons/new.png"))
         newBtn.setToolTip("New skeleposer")
         newBtn.clicked.connect(self.newNode)
 
@@ -2493,6 +2500,7 @@ class SkeleposerWindow(QFrame):
         self.treeWidget.itemSelectionChanged.connect(self.treeSelectionChanged)
 
         self.splitPoseWidget = SplitPoseWidget()
+        self.splitPoseWidget.setEnabled(False)
 
         hsplitter = WideSplitter(Qt.Horizontal)
         hsplitter.addWidget(self.jointsListWidget)
@@ -2531,7 +2539,7 @@ class SkeleposerWindow(QFrame):
     @undoBlock
     def addJoints(self):
         if skel:
-            ls = pm.ls(sl=True, type=["joint", "transform"])        
+            ls = pm.ls(sl=True, type=["joint", "transform"])
             if ls:
                 skel.addJoints(ls)
             else:
@@ -2556,6 +2564,7 @@ class SkeleposerWindow(QFrame):
             self.treeWidget.updateTree()
             self.skeleposerSelectorWidget.setText(str(node))
 
+            self.splitPoseWidget.setEnabled(True)
             self.splitPoseWidget.loadFromSkeleposer()
 
             self.registerCallbacks()
@@ -2564,6 +2573,7 @@ class SkeleposerWindow(QFrame):
             skel = None
             self.skeleposerSelectorWidget.setText("")
             self.treeWidget.clear()
+            self.splitPoseWidget.setEnabled(False)
             self.deregisterCallbacks()
 
         self.toolsWidget.hide()
@@ -2581,9 +2591,9 @@ class SkeleposerWindow(QFrame):
         self._callbacks.append( pm.api.MNodeMessage.addNameChangedCallback(nodeObject, nameChangedCallback) )
 
     def deregisterCallbacks(self):
-        for cb in self._callbacks:            
+        for cb in self._callbacks:
             pm.api.MMessage.removeCallback(cb)
-        self._callbacks = []            
+        self._callbacks = []
 
 def undoRedoCallback():
     if not skel or not skel.node.exists():
