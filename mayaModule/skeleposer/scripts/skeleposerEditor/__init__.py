@@ -18,11 +18,11 @@ mayaMainWindow = wrapInstance(int(api.MQtUtil.mainWindow()), QMainWindow)
 RootDirectory = os.path.dirname(__file__)
 
 def findSymmetricName(name, left=True, right=True):
-    L_starts = {"L_": "R_", "l_": "r_"}
-    L_ends = {"_L": "_R", "_l": "_r"}
+    L_starts = {"L_": "R_", "l_": "r_", "Left":"Right", "left_": "right_"}
+    L_ends = {"_L": "_R", "_l": "_r", "Left": "Right", "_left":"_right"}
 
-    R_starts = {"R_": "L_", "r_": "l_"}
-    R_ends = {"_R": "_L", "_r": "_l"}
+    R_starts = {"R_": "L_", "r_": "l_", "Right":"Left", "right_":"left_"}
+    R_ends = {"_R": "_L", "_r": "_l", "Right":"Left", "_right":"_left"}
 
     for enable, starts, ends in [(left, L_starts, L_ends), (right, R_starts, R_ends)]:
         if enable:
