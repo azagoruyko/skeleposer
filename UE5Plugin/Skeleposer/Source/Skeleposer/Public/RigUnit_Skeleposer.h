@@ -48,46 +48,11 @@ struct FLinearCurve
 /** Each Directory contains other directories and poses as indices*/
 struct FDirectory
 {
-	/** Not used currently */
-	float Weight;
-
 	/** 0 by default */
-	int ParentIndex;
+	int32 ParentIndex;
 
 	/** Positive index is Pose, Negative index is Directory */
-	TArray<int> ChildrenIndices;
-};
-
-/** List of directories by index. Indices got from Maya */
-class FDirectoryList
-{
-public:
-	FDirectoryList() {}
-
-	/** Directory accessor */
-	FDirectory& operator[](int Idx) { return _Items.FindOrAdd(Idx); }
-
-	/** Get poses in a correct order. 
-	* @param DirectoryIdx Index of a directory
-	* @param PoseIndices Output ordered indices	
-	*/
-	void GetPosesOrder(int DirectoryIdx, TArray<int32>& PoseIndices) const
-	{
-		const FDirectory *Found = _Items.Find(DirectoryIdx);
-		if (Found)
-		{
-			for (auto& Idx : Found->ChildrenIndices)
-			{
-				if (Idx >= 0)
-					PoseIndices.Add(Idx);
-				else
-					GetPosesOrder(-Idx, PoseIndices);
-			}
-		}
-	}
-
-private:
-	TMap<int32, FDirectory> _Items; /** Directory per index*/
+	TArray<int32> ChildrenIndices;
 };
 
 typedef enum
@@ -119,7 +84,7 @@ struct FPose
 struct FBonePose
 {
 	/** Pose name */
-	FString Name;
+	FString PoseName;
 
 	/** Blending type, ADDITIVE or REPLACE */
 	FPoseBlendMode BlendMode;
@@ -140,7 +105,7 @@ struct FRigUnit_Skeleposer_WorkData
 	GENERATED_BODY()
 
 	/** Poses be bone name */
-	TMap<FString, TArray<FBonePose>> BonePoses;
+	TMap<FRigElementKey, TArray<FBonePose>> BonePoses;
 	FString FilePathCache;
 
 	void Reset()

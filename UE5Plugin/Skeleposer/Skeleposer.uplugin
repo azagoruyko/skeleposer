@@ -22,7 +22,7 @@
             "Name": "Skeleposer",
             "Type": "Runtime",
             "LoadingPhase": "Default",
-            "WhitelistPlatforms": [ "Win64", "Win32", "Android" ]
+            "WhitelistPlatforms": [ "Win64", "Android" ]
         }
     ],
     "Plugins":

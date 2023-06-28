@@ -45,6 +45,33 @@ inline FMatrix ConvertMatrixFromMayaToUE(const FMatrix& Mat)
 	return Out;
 }
 
+FString StripNamespace(const FString& Name)
+{
+	// Find the last occurrence of ':'
+	int32 LastColonIndex;
+	if (Name.FindLastChar(':', LastColonIndex))
+	{
+		// Extract the substring starting from the character after the last ':'
+		return Name.Mid(LastColonIndex + 1);
+	}
+	return Name;
+}
+
+void GetPosesOrder(const TMap<int32, FDirectory>& Directories, int32 DirectoryIdx, TArray<int32>& PoseIndices)
+{
+	const FDirectory* Found = Directories.Find(DirectoryIdx);
+	if (Found)
+	{
+		for (auto& Idx : Found->ChildrenIndices)
+		{
+			if (Idx >= 0)
+				PoseIndices.Add(Idx);
+			else
+				GetPosesOrder(Directories, -Idx, PoseIndices);
+		}
+	}
+}
+
 FRigUnit_Skeleposer_Execute()
 {
 	DECLARE_SCOPE_HIERARCHICAL_COUNTER_RIGUNIT()
@@ -66,7 +93,7 @@ FRigUnit_Skeleposer_Execute()
 		{
 			WorkData.FilePathCache = FilePath; // cache file path
 
-			const FString FullFilePath = FPaths::ProjectContentDir() + "/" + FilePath;
+			const FString FullFilePath = FPaths::Combine(FPaths::ProjectContentDir(), FilePath);
 			if (!FPaths::FileExists(FullFilePath))
 			{
 				DisplayError("Cannot find '" + FilePath + "'. FilePath must be relative to the project's content directory", FColor::Red);
@@ -82,81 +109,78 @@ FRigUnit_Skeleposer_Execute()
 			return;
 		}
 
-		TMap<FString, float> PoseWeights; // user poses' weights and weights that are calculated during the computation
+		TMap<FString, float> PosesWeights; // user poses' weights and weights that are calculated during the computation
 		for (const auto &UserPose : UserPoses)
-			PoseWeights.Add(UserPose.PoseName, UserPose.PoseWeight);
+			PosesWeights.Add(UserPose.PoseName, UserPose.PoseWeight);
 
-		for (auto& BoneItem : WorkData.BonePoses) // go through bones
+		for (auto& [BoneKey, BonePoses] : WorkData.BonePoses) // go through bones
 		{
-			const FRigElementKey BoneKey(FName(*BoneItem.Key), ERigElementType::Bone);
+			if (!Hierarchy->Find(BoneKey))
+				continue;
 
-			if (Hierarchy->Find(BoneKey))
+			FTransform Local = Hierarchy->GetLocalTransform(BoneKey, false);
+
+			FVector Translation = Local.GetTranslation();
+			FQuat Rotation = Local.GetRotation();
+			FVector Scale = Local.GetScale3D();
+
+			for (const auto& BonePose : BonePoses)
 			{
-				FTransform Local = Hierarchy->GetLocalTransform(BoneKey, false);
-
-				FVector Translation = Local.GetTranslation();
-				FQuat Rotation = Local.GetRotation();
-				FVector Scale = Local.GetScale3D();
-
-				for (const auto& Pose : BoneItem.Value)
-				{
-					float PoseWeight = PoseWeights.FindOrAdd(Pose.Name, 0);
+				float PoseWeight = PosesWeights.FindOrAdd(BonePose.PoseName, 0);
 					
-					if (!Pose.Corrects.IsEmpty()) // if corrects found
+				if (!BonePose.Corrects.IsEmpty()) // if corrects found
+				{
+					PoseWeight = FLT_MAX; // find lowest weight
+					for (const FString& CorrectName : BonePose.Corrects)
 					{
-						PoseWeight = FLT_MAX; // find lowest weight
-						for (const FString& CorrectName : Pose.Corrects)
-						{
-							const float w = PoseWeights.FindOrAdd(CorrectName, 0);
-							if (w < PoseWeight)
-								PoseWeight = w;
-						}	
-
-						PoseWeights[Pose.Name] = PoseWeight;
-					}
-
-					if (!Pose.Inbetween.Value.IsEmpty())
-					{
-						const float SourcePoseWeight = PoseWeights.FindOrAdd(Pose.Inbetween.Key, 0);
-						PoseWeight = Pose.Inbetween.Value.EvaluateFromX(SourcePoseWeight).Y;
-						PoseWeights[Pose.Name] = PoseWeight;
-					}
-
-					if (PoseWeight > 1e-3)
-					{	
-						if (Pose.BlendMode == FPoseBlendMode::ADDITIVE)
-						{
-							Translation += Pose.Delta.GetTranslation() * PoseWeight;
-							Rotation = FQuat::Slerp(Rotation, Rotation * Pose.Delta.GetRotation(), PoseWeight);
-							Scale = FMath::Lerp(Scale, Pose.Delta.GetScale3D() * Scale, PoseWeight);
-						}
-
-						else if (Pose.BlendMode == FPoseBlendMode::REPLACE)
-						{
-							Translation = FMath::Lerp(Translation, Pose.Delta.GetTranslation(), PoseWeight);
-							Rotation = FQuat::Slerp(Rotation, Pose.Delta.GetRotation(), PoseWeight);
-							Scale = FMath::Lerp(Scale, Pose.Delta.GetScale3D(), PoseWeight);
-						}
+						const float w = PosesWeights.FindOrAdd(CorrectName, 0);
+						if (w < PoseWeight)
+							PoseWeight = w;
 					}
 				}
 
-				Local.SetTranslation(Translation);
-				Local.SetRotation(Rotation);
-				Local.SetScale3D(Scale);
+				if (!BonePose.Inbetween.Value.IsEmpty())
+				{
+					const float SourcePoseWeight = PosesWeights.FindOrAdd(BonePose.Inbetween.Key, 0);
+					PoseWeight = BonePose.Inbetween.Value.EvaluateFromX(SourcePoseWeight).Y;
+				}
 
-				Hierarchy->SetLocalTransform(BoneKey, Local);
+				PosesWeights[BonePose.PoseName] = PoseWeight; // save weight for the pose
+
+				if (PoseWeight > 1e-3)
+				{	
+					if (BonePose.BlendMode == FPoseBlendMode::ADDITIVE)
+					{
+						Translation += BonePose.Delta.GetTranslation() * PoseWeight;
+						Rotation = FQuat::Slerp(Rotation, Rotation * BonePose.Delta.GetRotation(), PoseWeight);
+						Scale = FMath::Lerp(Scale, BonePose.Delta.GetScale3D() * Scale, PoseWeight);
+					}
+
+					else if (BonePose.BlendMode == FPoseBlendMode::REPLACE)
+					{
+						Translation = FMath::Lerp(Translation, BonePose.Delta.GetTranslation(), PoseWeight);
+						Rotation = FQuat::Slerp(Rotation, BonePose.Delta.GetRotation(), PoseWeight);
+						Scale = FMath::Lerp(Scale, BonePose.Delta.GetScale3D(), PoseWeight);
+					}
+				}
 			}
+
+			Local.SetTranslation(Translation);
+			Local.SetRotation(Rotation);
+			Local.SetScale3D(Scale);
+
+			Hierarchy->SetLocalTransform(BoneKey, Local);
 		}
 
 		// activate poses' morph targets
 		if (bUseMorphTargets)
 		{
-			for (const auto& PoseWeightItem : PoseWeights)
+			for (const auto& [PoseName, PoseWeight] : PosesWeights)
 			{
-				FRigElementKey CurveKey(FName(PoseWeightItem.Key), ERigElementType::Curve);
+				FRigElementKey CurveKey(FName(PoseName), ERigElementType::Curve);
 				
 				if (Hierarchy->Find(CurveKey))
-					Hierarchy->SetCurveValue(CurveKey, PoseWeightItem.Value);
+					Hierarchy->SetCurveValue(CurveKey, PoseWeight);
 			}
 		}
 	}
@@ -178,68 +202,62 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 	if (FJsonSerializer::Deserialize(Reader, JsonObject))
 	{
 		// get joints and indices used in poseDeltaMatrices
-		const TSharedPtr<FJsonObject> JointsItem = JsonObject->Values["joints"]->AsObject();
-		if (!JointsItem)
-			return;
+		const TSharedPtr<FJsonObject> JointsObject = JsonObject->Values["joints"]->AsObject();
 
-		TMap<int32, FString> BoneNames;
-		for (const auto& Item : JointsItem->Values)
+		TMap<int32, FRigElementKey> Bones; // per index		
+		for (const auto& [JointIdxStr, JointValue] : JointsObject->Values)
 		{
-			const int32 Idx = FCString::Atoi(*Item.Key);
+			const int32 Idx = FCString::Atoi(*JointIdxStr);
 
-			const FString BoneName = Item.Value->AsString();
-			BoneNames.Add(Idx, BoneName);
-			BonePoses.Add(BoneName);
+			const FString BoneName = StripNamespace(JointValue->AsString()); // UE remove namespace for bones automatically
+
+			const FRigElementKey BoneKey(FName(*BoneName), ERigElementType::Bone);
+			Bones.Add(Idx, BoneKey);
+			BonePoses.Add(BoneKey);
 		}
 
 		// get directories
-		FDirectoryList DirectoryList;
+		TMap<int32, FDirectory> Directories;
 
-		const TSharedPtr<FJsonObject> DirectoriesItem = JsonObject->Values["directories"]->AsObject();
-		if (!DirectoriesItem)
-			return;
+		const TSharedPtr<FJsonObject> DirectoriesObject = JsonObject->Values["directories"]->AsObject();
 
-		for (const auto& Item : DirectoriesItem->Values)
+		for (const auto& [DirIdxStr, DirObject] : DirectoriesObject->Values)
 		{
-			const int32 Idx = FCString::Atoi(*Item.Key);
-			const auto& DirectoryValues = Item.Value->AsObject()->Values;
+			const int32 Idx = FCString::Atoi(*DirIdxStr);
+			const auto& DirValue = DirObject->AsObject()->Values;
 
-			FDirectory& Directory = DirectoryList[Idx];
+			FDirectory& Directory = Directories.Add(Idx);
+			Directory.ParentIndex = DirValue["directoryParentIndex"]->AsNumber();
 
-			Directory.Weight = 1;
-			Directory.ParentIndex = DirectoryValues["directoryParentIndex"]->AsNumber();;
-
-			for (const auto& ChildIndex : DirectoryValues["directoryChildrenIndices"]->AsArray())
+			for (const auto& ChildIndex : DirValue["directoryChildrenIndices"]->AsArray())
 				Directory.ChildrenIndices.Add(ChildIndex->AsNumber());
 		}
 
 		// get poses
-		const TSharedPtr<FJsonObject> PosesItem = JsonObject->Values["poses"]->AsObject();
-		if (!PosesItem)
-			return;
+		const TSharedPtr<FJsonObject> PosesObject = JsonObject->Values["poses"]->AsObject();
 
-		TMap<int32, FPose> PoseList; // pose per index
-		for (const auto& Item : PosesItem->Values)
+		TMap<int32, FPose> Poses; // pose per index
+		for (const auto& [PoseName, PoseObject] : PosesObject->Values)
 		{
-			const int32 PoseIdx = FCString::Atoi(*Item.Key);
-			const auto& PoseValues = Item.Value->AsObject()->Values;
+			const int32 PoseIdx = FCString::Atoi(*PoseName);
+			const auto& PoseValue = PoseObject->AsObject()->Values;
 
-			FPose& Pose = PoseList.FindOrAdd(PoseIdx);
+			FPose& Pose = Poses.FindOrAdd(PoseIdx);
 
-			Pose.Name = PoseValues["poseName"]->AsString();
-			Pose.BlendMode = (FPoseBlendMode)PoseValues["poseBlendMode"]->AsNumber();
+			Pose.Name = PoseValue["poseName"]->AsString();
+			Pose.BlendMode = (FPoseBlendMode)PoseValue["poseBlendMode"]->AsNumber();
 
 			PoseNameList.Add(Pose.Name);
 
-			if (PoseValues.Contains("corrects"))
+			if (PoseValue.Contains("corrects"))
 			{
-				for (const auto& CorrectItem : PoseValues["corrects"]->AsArray())
-					Pose.Corrects.Add(CorrectItem->AsNumber());
+				for (const auto& CorrectValue : PoseValue["corrects"]->AsArray())
+					Pose.Corrects.Add(CorrectValue->AsNumber());
 			}
 
-			if (PoseValues.Contains("inbetween")) // idx, [(x,y), (x,y)]
+			if (PoseValue.Contains("inbetween")) // idx, [(x,y), (x,y)]
 			{
-				const TArray<TSharedPtr<FJsonValue>> &InbetweenArray = PoseValues["inbetween"]->AsArray();
+				const TArray<TSharedPtr<FJsonValue>> &InbetweenArray = PoseValue["inbetween"]->AsArray();
 
 				Pose.Inbetween.Key = InbetweenArray[0]->AsNumber(); // source pose index
 
@@ -261,14 +279,14 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 				Pose.Inbetween.Value.Points.Add(LastPoint);
 			}
 
-			for (const auto& DeltaMatricesItem : PoseValues["poseDeltaMatrices"]->AsObject()->Values)
+			for (const auto& [DeltaMatrixIdxStr, DeltaMatrixArrayValue] : PoseValue["poseDeltaMatrices"]->AsObject()->Values)
 			{
-				const int32 BoneIdx = FCString::Atoi(*DeltaMatricesItem.Key);
+				const int32 BoneIdx = FCString::Atoi(*DeltaMatrixIdxStr);
 
 				FMatrix Mat;
-				auto& DeltaMatrixValue = DeltaMatricesItem.Value->AsArray();
-				for (int i = 0; i < 4; i++)
-					for (int j = 0; j < 4; j++)
+				auto& DeltaMatrixValue = DeltaMatrixArrayValue->AsArray();
+				for (int32 i = 0; i < 4; i++)
+					for (int32 j = 0; j < 4; j++)
 						Mat.M[i][j] = DeltaMatrixValue[i * 4 + j]->AsNumber();
 
 				// convert axes from Maya to UE
@@ -286,31 +304,34 @@ void FRigUnit_Skeleposer_WorkData::ReadJsonFile(const FString& FilePath, TArray<
 
 		// get all poses indices in a correct order
 		TArray<int32> PoseIndices;
-		DirectoryList.GetPosesOrder(0, PoseIndices);
+		GetPosesOrder(Directories, 0, PoseIndices);
 
 		// get pose per bone list, like bone1:[pose1, pose2, pose3], bone2:[pose1, pose4]
 		for (int32 PoseIdx : PoseIndices)
 		{
-			const FPose& Pose = PoseList[PoseIdx];
+			const FPose& Pose = Poses[PoseIdx];
 
-			for (const auto& DeltaItem : Pose.Deltas)
+			for (const auto& [DeltaIndex, DeltaTransform] : Pose.Deltas)
 			{
 				FBonePose BonePose;
-				BonePose.Name = Pose.Name;
+				BonePose.PoseName = Pose.Name;
 				BonePose.BlendMode = Pose.BlendMode;
-				BonePose.Delta = DeltaItem.Value;
+				BonePose.Delta = DeltaTransform;
 
 				for (int32 CorrectIdx : Pose.Corrects)
-					BonePose.Corrects.Add(PoseList[CorrectIdx].Name);
+					BonePose.Corrects.Add(Poses[CorrectIdx].Name);
 
 				if (!Pose.Inbetween.Value.IsEmpty())
 				{
-					BonePose.Inbetween.Key = PoseList[Pose.Inbetween.Key].Name;
+					BonePose.Inbetween.Key = Poses[Pose.Inbetween.Key].Name;
 					BonePose.Inbetween.Value = Pose.Inbetween.Value;
 				}
 
-				const FString& BoneName = BoneNames[DeltaItem.Key];
-				BonePoses[BoneName].Add(BonePose);
+				const FRigElementKey *BoneKey = Bones.Find(DeltaIndex);
+				if (BoneKey)
+					BonePoses[*BoneKey].Add(BonePose);
+				else
+					DisplayError("Cannot find bone at index "+FString::FromInt(DeltaIndex), FColor::Red);
 			}
 		}
 	}
