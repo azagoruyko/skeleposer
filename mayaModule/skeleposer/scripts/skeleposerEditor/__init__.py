@@ -2113,19 +2113,35 @@ class PoseTreeWidget(QTreeWidget):
 
         menu = QMenu(self)
 
-        addAction = QAction("Add", self)
+        addAction = QAction("Add\tINS", self)
         addAction.triggered.connect(lambda _=None: self.addPoseItem())
         menu.addAction(addAction)
 
         if self.selectedItems():
-            duplicateAction = QAction("Duplicate", self)
+            duplicateAction = QAction("Duplicate\tCTRL-D", self)
             duplicateAction.triggered.connect(lambda _=None: self.duplicatePoseItem())
             menu.addAction(duplicateAction)
 
-        removeAction = QAction("Remove", self)
+        removeAction = QAction("Remove\tDEL", self)
         removeAction.triggered.connect(lambda _=None: self.removePoseItem())
         menu.addAction(removeAction)
         menu.popup(event.globalPos())
+
+    def keyPressEvent(self, event):
+        ctrl = event.modifiers() & Qt.ControlModifier
+
+        if ctrl:
+            if event.key() == Qt.Key_D:
+                self.duplicatePoseItem()
+
+        elif event.key() == Qt.Key_Insert:
+            self.addPoseItem()
+
+        elif event.key() == Qt.Key_Delete:
+            self.removePoseItem()
+
+        else:
+            super(PoseTreeWidget, self).keyPressEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mouseButtons() == Qt.MiddleButton:
@@ -2219,19 +2235,35 @@ class PatternTableWidget(QTableWidget):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
 
-        addAction = QAction("Add", self)
+        addAction = QAction("Add\tINS", self)
         addAction.triggered.connect(lambda _=None: self.addPatternItem())
         menu.addAction(addAction)
 
         if self.selectedItems():
-            duplicateAction = QAction("Duplicate", self)
+            duplicateAction = QAction("Duplicate\tCTRL-D", self)
             duplicateAction.triggered.connect(lambda _=None: self.duplicatePatternItem())
             menu.addAction(duplicateAction)
 
-        removeAction = QAction("Remove", self)
+        removeAction = QAction("Remove\tDEL", self)
         removeAction.triggered.connect(lambda _=None: self.removePatternItem())
         menu.addAction(removeAction)
         menu.popup(event.globalPos())
+
+    def keyPressEvent(self, event):
+        ctrl = event.modifiers() & Qt.ControlModifier
+
+        if ctrl:
+            if event.key() == Qt.Key_D:
+                self.duplicatePatternItem()
+
+        elif event.key() == Qt.Key_Insert:
+            self.addPatternItem()
+
+        elif event.key() == Qt.Key_Delete:
+            self.removePatternItem()
+
+        else:
+            super(PatternTableWidget, self).keyPressEvent(event)
 
     def validateItem(self, item):
         self.blockSignals(True)
@@ -2318,9 +2350,8 @@ class SplitPoseWidget(QWidget):
         applyLayout.setStretch(1, 1)
 
         hsplitter.addWidget(self.posesWidget)
-        hsplitter.addWidget(self.patternsWidget)
+        hsplitter.addWidget(self.patternsWidget)        
         layout.addWidget(hsplitter)
-
         layout.addLayout(blendLayout)
         layout.addLayout(applyLayout)
 
@@ -2392,9 +2423,9 @@ class SplitPoseWidget(QWidget):
                 splitPoses(sourceItem, sourcePose)
                 if pm.objExists(blendShape):
                     splitBlends(sourceItem, sourcePose)
-
         else:
             rootItem = self.posesWidget.invisibleRootItem()
+
             splitPoses(rootItem)
             if pm.objExists(blendShape):
                 splitBlends(rootItem)
