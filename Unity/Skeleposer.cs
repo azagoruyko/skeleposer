@@ -4,6 +4,7 @@ using UnityEngine;
 using System;
 using SimpleJSON;
 using System.Linq;
+using Unity.VisualScripting;
 
 public enum BlendMode
 {
@@ -39,18 +40,47 @@ public struct UserPose
     [Range(0, 1)]
     public float poseWeight;
 }
+/*
+[Serializable]
+public struct IKTriple
+{
+    public Transform root;
+    public Transform mid;
+    public Transform tip;
+    public bool enableIK;
+}*/
 
+[RequireComponent(typeof(Animator))]
 public class Skeleposer : MonoBehaviour
 {
-    public Animator animator;
     public string filePath;
     public SkinnedMeshRenderer meshWithBlendShapes;
-
     public List<UserPose> userPoses;
-
-    Dictionary<GameObject, Matrix4x4> initialMatrices;
+    //public List<IKTriple> iks;
+        
     Dictionary<GameObject, List<BonePose>> bonePoses; // per bone
     Dictionary<string, int> blendShapes; // name: index
+
+    Dictionary<GameObject, Matrix4x4> initialMatrices;
+    Animator animator;
+
+    Matrix4x4 convertMayaMatrixToUnity(Matrix4x4 m)
+    {
+         // translation
+        var unityPosition = new Vector3(-m.GetPosition().x, m.GetPosition().y, m.GetPosition().z);
+
+        // rotation        
+        var flippedRotation = new Vector3(m.rotation.eulerAngles.x, -m.rotation.eulerAngles.y, -m.rotation.eulerAngles.z);
+        var qx = Quaternion.AngleAxis(flippedRotation.x, Vector3.right);
+        var qy = Quaternion.AngleAxis(flippedRotation.y, Vector3.up);
+        var qz = Quaternion.AngleAxis(flippedRotation.z, Vector3.forward);
+        var unityRotation = qz * qy * qx; // exact order!
+
+        // scale
+        var unityScaling = new Vector3(m.lossyScale.x, m.lossyScale.y, m.lossyScale.z);
+
+        return Matrix4x4.TRS(unityPosition, unityRotation, unityScaling);
+    }
 
     static void getPosesOrder(Dictionary<int, Directory> directories, int directoryIdx, ref List<int> poseIndices)
     {
@@ -157,7 +187,7 @@ public class Skeleposer : MonoBehaviour
                 deltaMatrix[13] /= 100.0f;
                 deltaMatrix[14] /= 100.0f;
 
-                pose.deltaMatrices.Add(deltaIdx, deltaMatrix);
+                pose.deltaMatrices.Add(deltaIdx, convertMayaMatrixToUnity(deltaMatrix));
             }            
             
             poses.Add(poseIdx, pose);
@@ -212,15 +242,14 @@ public class Skeleposer : MonoBehaviour
     }
 
     // Start is called before the first frame update
-    void Start()
+    public void Start()
     {
         initialMatrices = new();
 
         string fullFilePath = Path.Combine(Application.streamingAssetsPath, filePath);
-        if (File.Exists(fullFilePath)) 
+        if (File.Exists(fullFilePath))
         {
             loadFromJson(fullFilePath);
-
             getBlendShapes();
 
             // save matrices
@@ -231,13 +260,13 @@ public class Skeleposer : MonoBehaviour
             }
         }
         else
-            Debug.LogError("Cannot find "+ fullFilePath);
+            Debug.LogError("Cannot find " + fullFilePath);
 
-        if (animator != null)
-            animator.enabled = false;  // disable attached animator
+        animator = GetComponent<Animator>();
+        animator.enabled = false;
     }
 
-    private void Update()
+    public void Update()
     {
         // restore initial matrices
         foreach (var (bone, m) in initialMatrices)
@@ -246,13 +275,23 @@ public class Skeleposer : MonoBehaviour
             bone.transform.localScale = m.lossyScale;
         }
 
-        if (animator != null)
-            animator.Update(Time.deltaTime);
-
-        updateSkeleposer();
+        animator.Update(Time.deltaTime);
+        /*
+        // keep tip ik positions
+        List<Vector3> ikTipPositions = new();
+        foreach (var ikItem in iks)
+            ikTipPositions.Add(ikItem.tip.position);
+        */
+        UpdateSkeleposer();
+        /*
+        for (int i = 0; i < iks.Count; i++)
+        {
+            if (iks[i].enableIK && iks[i].tip.position != ikTipPositions[i])
+                solveTwoBoneIK(iks[i].root, iks[i].mid, iks[i].tip, ikTipPositions[i], Vector3.zero, 1, 0);
+        }*/
     }
 
-    void updateSkeleposer()
+    void UpdateSkeleposer()
     {
         if (userPoses.Count == 0)
             return;
@@ -267,17 +306,17 @@ public class Skeleposer : MonoBehaviour
 
             Vector3 translation = boneTransform.localPosition;
             Quaternion rotation = boneTransform.localRotation;
-            Vector3 scale = boneTransform.localScale;
+            Vector3 scale = Vector3.one;// we consider scale is not animated!
 
             foreach (var bonePose in bonePoses)
             {
                 float poseWeight = posesWeights.GetValueOrDefault(bonePose.poseName, 0.0f);
-                
-                if (bonePose.corrects.Count>0) // if corrects found
+
+                if (bonePose.corrects.Count > 0) // if corrects found
                 {
                     poseWeight = float.MaxValue; // find lowest weight
                     foreach (string correctPoseName in bonePose.corrects)
-					{
+                    {
                         float w = posesWeights.GetValueOrDefault(correctPoseName, 0.0f);
                         if (w < poseWeight)
                             poseWeight = w;
@@ -320,4 +359,101 @@ public class Skeleposer : MonoBehaviour
             }
         }
     }
+    /*
+    static float TriangleAngle(float a, float b, float c)
+    {
+        float v = Mathf.Clamp((b * b + c * c - a * a) / (b * c) / 2.0f, -1.0f, 1.0f);
+        return Mathf.Acos(v);
+    }
+
+    // Implementation is taken from AnimationRuntimeUtils.SolveTwoBoneIK
+    void solveTwoBoneIK(
+        Transform root,
+        Transform mid,
+        Transform tip,
+        Vector3 targetPos,
+        Vector3 hintPos,
+        float targetWeight = 1,
+        float hintWeight = 1)
+    {
+        const float k_SqrEpsilon = 1e-8f;
+
+        Vector3 aPosition = root.position;
+        Vector3 bPosition = mid.position;
+        Vector3 cPosition = tip.position;
+        Vector3 tPosition = Vector3.Lerp(cPosition, targetPos, targetWeight);
+        Quaternion tRotation = new Quaternion(tip.rotation.x, tip.rotation.y, tip.rotation.z, tip.rotation.w);
+
+        bool hasHint = hintWeight > 0f;
+
+        Vector3 ab = bPosition - aPosition;
+        Vector3 bc = cPosition - bPosition;
+        Vector3 ac = cPosition - aPosition;
+        Vector3 at = tPosition - aPosition;
+
+        float abLen = ab.magnitude;
+        float bcLen = bc.magnitude;
+        float acLen = ac.magnitude;
+        float atLen = at.magnitude;
+
+        float oldAbcAngle = TriangleAngle(acLen, abLen, bcLen);
+        float newAbcAngle = TriangleAngle(atLen, abLen, bcLen);
+
+        // Bend normal strategy is to take whatever has been provided in the animation
+        // stream to minimize configuration changes, however if this is collinear
+        // try computing a bend normal given the desired target position.
+        // If this also fails, try resolving axis using hint if provided.
+        Vector3 axis = Vector3.Cross(ab, bc);
+        if (axis.sqrMagnitude < k_SqrEpsilon)
+        {
+            axis = hasHint ? Vector3.Cross(hintPos - aPosition, bc) : Vector3.zero;
+
+            if (axis.sqrMagnitude < k_SqrEpsilon)
+                axis = Vector3.Cross(at, bc);
+
+            if (axis.sqrMagnitude < k_SqrEpsilon)
+                axis = Vector3.up;
+        }
+        axis = Vector3.Normalize(axis);
+
+        float a = 0.5f * (oldAbcAngle - newAbcAngle);
+        float sin = Mathf.Sin(a);
+        float cos = Mathf.Cos(a);
+        Quaternion deltaR = new Quaternion(axis.x * sin, axis.y * sin, axis.z * sin, cos);
+        mid.rotation = deltaR * mid.rotation;
+
+        cPosition = tip.position;
+        ac = cPosition - aPosition;
+        root.rotation = Quaternion.FromToRotation(ac, at) * root.rotation;
+
+        if (hasHint)
+        {
+            float acSqrMag = ac.sqrMagnitude;
+            if (acSqrMag > 0f)
+            {
+                bPosition = mid.position;
+                cPosition = tip.position;
+                ab = bPosition - aPosition;
+                ac = cPosition - aPosition;
+
+                Vector3 acNorm = ac / Mathf.Sqrt(acSqrMag);
+                Vector3 ah = hintPos - aPosition;
+                Vector3 abProj = ab - acNorm * Vector3.Dot(ab, acNorm);
+                Vector3 ahProj = ah - acNorm * Vector3.Dot(ah, acNorm);
+
+                float maxReach = abLen + bcLen;
+                if (abProj.sqrMagnitude > (maxReach * maxReach * 0.001f) && ahProj.sqrMagnitude > 0f)
+                {
+                    Quaternion hintR = Quaternion.FromToRotation(abProj, ahProj);
+                    hintR.x *= hintWeight;
+                    hintR.y *= hintWeight;
+                    hintR.z *= hintWeight;
+                    hintR = Quaternion.Normalize(hintR);
+                    root.rotation = hintR * root.rotation;
+                }
+            }
+        }
+
+        tip.rotation = tRotation;
+    }*/
 }
