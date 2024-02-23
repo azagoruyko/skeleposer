@@ -1401,139 +1401,67 @@ class TreeWidget(QTreeWidget):
         menu = QMenu(self)
 
         if len(selectedItems)>1:
-            addCorrectPoseAction = QAction("Add corrective pose", self)
-            addCorrectPoseAction.triggered.connect(lambda _=None: self.addCorrectivePose())
-            menu.addAction(addCorrectPoseAction)
-
-            weightFromSelectionAction = QAction("Weight from selection", self)
-            weightFromSelectionAction.triggered.connect(lambda _=None: self.weightFromSelection())
-            menu.addAction(weightFromSelectionAction)
-
-            inbetweenFromSelectionAction = QAction("Inbetween from selection", self)
-            inbetweenFromSelectionAction.triggered.connect(lambda _=None: self.inbetweenFromSelection())
-            menu.addAction(inbetweenFromSelectionAction)
+            menu.addAction("Add corrective pose", self.addCorrectivePose)
+            menu.addAction("Weight from selection", self.weightFromSelection)
+            menu.addAction("Inbetween from selection", self.inbetweenFromSelection)
             menu.addSeparator()
 
         elif len(selectedItems)==1:
-            addInbetweenAction = QAction("Add inbetween pose", self)
-            addInbetweenAction.triggered.connect(lambda _=None: self.addInbetweenPose())
-            menu.addAction(addInbetweenAction)
+            menu.addAction("Add inbetween pose", self.addInbetweenPose)
             menu.addSeparator()
 
-        addPoseAction = QAction("Add pose\tINS", self)
-        addPoseAction.triggered.connect(lambda _=None: self.makePose("Pose", self.getValidParent()))
-        menu.addAction(addPoseAction)
-
-        groupAction = QAction("Group\tCTRL-G", self)
-        groupAction.triggered.connect(lambda _=None: self.groupSelected())
-        menu.addAction(groupAction)
+        menu.addAction("Add pose", lambda: self.makePose("Pose", self.getValidParent()), "Insert")
+        menu.addAction("Group", self.groupSelected, "Ctrl-G")
 
         if selectedItems:
-            duplicateAction = QAction("Duplicate\tCTRL-D", self)
-            duplicateAction.triggered.connect(lambda _=None: self.duplicateItems())
-            menu.addAction(duplicateAction)
-
-            removeAction = QAction("Remove\tDEL", self)
-            removeAction.triggered.connect(lambda _=None: self.removeItems())
-            menu.addAction(removeAction)
+            menu.addAction("Duplicate", self.duplicateItems, "Ctrl-D")
+            menu.addAction("Remove", self.removeItems, "Delete")
 
             menu.addSeparator()
 
-            muteAction = QAction("Mute\tM", self)
-            muteAction.triggered.connect(lambda _=None: self.muteItems())
-            menu.addAction(muteAction)
-
-            copyPoseDeltaAction = QAction("Copy delta\tCTRL-C", self)
-            copyPoseDeltaAction.triggered.connect(lambda _=None: self.copyPoseJointsDelta())
-            menu.addAction(copyPoseDeltaAction)
-
-            copyPoseJointsDeltaAction = QAction("Copy selected joints delta", self)
-            copyPoseJointsDeltaAction.triggered.connect(lambda _=None: self.copyPoseJointsDelta(pm.ls(sl=True, type=["joint", "transform"])))
-            menu.addAction(copyPoseJointsDeltaAction)
-
-            pastePoseDeltaAction = QAction("Paste delta\tCTRL-V", self)
-            pastePoseDeltaAction.triggered.connect(lambda _=None: self.pastePoseDelta())
+            menu.addAction("Mute", self.muteItems, "m")
+            menu.addAction("Copy delta", self.copyPoseJointsDelta, "Ctrl-C")
+            menu.addAction("Copy selected joints delta", lambda: self.copyPoseJointsDelta(pm.ls(sl=True, type=["joint", "transform"])))
+            pastePoseDeltaAction = menu.addAction("Paste delta", self.pastePoseDelta, "Ctrl-V")
             pastePoseDeltaAction.setEnabled(True if self.clipboard else False)
-            menu.addAction(pastePoseDeltaAction)
 
-            mirrorAction = QAction("Mirror\tCTRL-M", self)
-            mirrorAction.triggered.connect(lambda _=None: self.mirrorItems())
-            menu.addAction(mirrorAction)
-
-            flipAction = QAction("Flip\tCTRL-F", self)
-            flipAction.triggered.connect(lambda _=None: self.flipItems())
-            menu.addAction(flipAction)
-
-            flipOnOppositeAction = QAction("Flip on opposite pose", self)
-            flipOnOppositeAction.triggered.connect(lambda _=None: self.flipItemsOnOppositePose())
-            menu.addAction(flipOnOppositeAction)
-
-            searchReplaceAction = QAction("Search/Replace\tCTRL-R", self)
-            searchReplaceAction.triggered.connect(lambda _=None: self.searchWindow.show())
-            menu.addAction(searchReplaceAction)
+            menu.addAction("Mirror", self.mirrorItems, "Ctrl-M")
+            menu.addAction("Flip", self.flipItems, "Ctrl-F")
+            menu.addAction("Flip on opposite pose", self.flipItemsOnOppositePose)
+            menu.addAction("Search/Replace", self.searchWindow.show, "Ctrl-R")
 
             menu.addSeparator()
 
             blendMenu = QMenu("Blend mode", self)
-            additiveBlendAction = QAction("Additive", self)
-            additiveBlendAction.triggered.connect(lambda _=None: self.setPoseBlendMode(0))
-            blendMenu.addAction(additiveBlendAction)
-
-            replaceBlendAction = QAction("Replace", self)
-            replaceBlendAction.triggered.connect(lambda _=None: self.setPoseBlendMode(1))
-            blendMenu.addAction(replaceBlendAction)
+            blendMenu.addAction("Additive", lambda: self.setPoseBlendMode(0))
+            blendMenu.addAction("Replace", lambda: self.setPoseBlendMode(1))
 
             menu.addMenu(blendMenu)
 
             menu.addSeparator()
-
-            selectChangedJointsAction = QAction("Select changed joints", self)
-            selectChangedJointsAction.triggered.connect(lambda _=None: self.selectChangedJoints())
-            menu.addAction(selectChangedJointsAction)
-
-            resetJointsAction = QAction("Reset selected joints", self)
-            resetJointsAction.triggered.connect(lambda _=None: self.resetJoints())
-            menu.addAction(resetJointsAction)
+            menu.addAction("Select changed joints", self.selectChangedJoints)
+            menu.addAction("Reset selected joints", self.resetJoints)
 
         menu.addSeparator()
 
-        collapseOthersAction = QAction("Collapse others\tCTRL-SPACE", self)
-        collapseOthersAction.triggered.connect(lambda _=None: self.collapseOthers())
-        menu.addAction(collapseOthersAction)
-
-        resetWeightsAction = QAction("Reset weights", self)
-        resetWeightsAction.triggered.connect(lambda _=None: self.resetWeights())
-        menu.addAction(resetWeightsAction)
+        menu.addAction("Collapse others", self.collapseOthers, "Ctrl-Space")
+        menu.addAction("Reset weights", self.resetWeights)
 
         connectionsMenu = QMenu("Output connections", self)
-        connectAction = QAction("Connect", self)
-        connectAction.triggered.connect(lambda _=None: skel.reconnectOutputs())
-        connectionsMenu.addAction(connectAction)
-
-        disconnectAction = QAction("Disonnect", self)
-        disconnectAction.triggered.connect(lambda _=None: skel.disconnectOutputs())
-        connectionsMenu.addAction(disconnectAction)
+        connectionsMenu.addAction("Connect", skel.reconnectOutputs)
+        connectionsMenu.addAction("Disonnect", skel.disconnectOutputs)
 
         menu.addMenu(connectionsMenu)
 
-        updateBaseAction = QAction("Update base matrices", self)
-        updateBaseAction.triggered.connect(lambda _=None: skel.updateBaseMatrices())
-        menu.addAction(updateBaseAction)
+        menu.addAction("Update base matrices", self.updateBaseMatrices)
 
         fileMenu = QMenu("File", self)
-        saveAction = QAction("Save", self)
-        saveAction.triggered.connect(lambda _=None: self.saveSkeleposer())
-        fileMenu.addAction(saveAction)
-
-        loadAction = QAction("Load", self)
-        loadAction.triggered.connect(lambda _=None: self.loadSkeleposer())
-        fileMenu.addAction(loadAction)
+        fileMenu.addAction("Save", self.saveSkeleposer())
+        fileMenu.addAction("Load", self.loadSkeleposer())
 
         menu.addMenu(fileMenu)
 
-        selectNodeAction = QAction("Select node", self)
-        selectNodeAction.triggered.connect(lambda _=None: pm.select(skel.node))
-        menu.addAction(selectNodeAction)
+        menu.addAction("Select node", lambda: pm.select(skel.node))
 
         menu.popup(event.globalPos())
 
@@ -1808,7 +1736,7 @@ class TreeWidget(QTreeWidget):
     def dropEvent(self, event):
         QTreeWidget.dropEvent(self, event)
 
-        for item in self.dragItems:
+        for item in sorted(self.dragItems, key=lambda x: -(x.parent() or self.invisibleRootItem()).indexOfChild(x)): # greater index first
             self.treeItemChanged(item)
 
             if item.directoryIndex is not None: # update widgets for all children
@@ -2113,18 +2041,12 @@ class PoseTreeWidget(QTreeWidget):
 
         menu = QMenu(self)
 
-        addAction = QAction("Add\tINS", self)
-        addAction.triggered.connect(lambda _=None: self.addPoseItem())
-        menu.addAction(addAction)
+        menu.addAction("Add", self.addPoseItem, "Insert")
 
         if self.selectedItems():
-            duplicateAction = QAction("Duplicate\tCTRL-D", self)
-            duplicateAction.triggered.connect(lambda _=None: self.duplicatePoseItem())
-            menu.addAction(duplicateAction)
+            menu.addAction("Duplicate", self.duplicatePoseItem, "Ctrl-D")
 
-        removeAction = QAction("Remove\tDEL", self)
-        removeAction.triggered.connect(lambda _=None: self.removePoseItem())
-        menu.addAction(removeAction)
+        menu.addAction("Remove", self.removePoseItem, "Delete")
         menu.popup(event.globalPos())
 
     def keyPressEvent(self, event):
@@ -2235,18 +2157,12 @@ class PatternTableWidget(QTableWidget):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
 
-        addAction = QAction("Add\tINS", self)
-        addAction.triggered.connect(lambda _=None: self.addPatternItem())
-        menu.addAction(addAction)
+        menu.addAction("Add", self.addPatternItem, "Insert")
 
         if self.selectedItems():
-            duplicateAction = QAction("Duplicate\tCTRL-D", self)
-            duplicateAction.triggered.connect(lambda _=None: self.duplicatePatternItem())
-            menu.addAction(duplicateAction)
+            menu.addAction("Duplicate", self.duplicatePatternItem, "Ctrl-D")
 
-        removeAction = QAction("Remove\tDEL", self)
-        removeAction.triggered.connect(lambda _=None: self.removePatternItem())
-        menu.addAction(removeAction)
+        menu.addAction("Remove", self.removePatternItem, "Delete")
         menu.popup(event.globalPos())
 
     def keyPressEvent(self, event):
@@ -2463,9 +2379,7 @@ class SkeleposerSelectorWidget(QLineEdit):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         for n in cmds.ls(type="skeleposer"):
-            action = QAction(n, self)
-            action.triggered.connect(lambda _=None, name=n: self.nodeChanged.emit(name))
-            menu.addAction(action)
+            menu.addAction(n, lambda name=n: self.nodeChanged.emit(name))
         menu.popup(event.globalPos())
 
     def mouseDoubleClickEvent(self, event):
