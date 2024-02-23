@@ -9,22 +9,27 @@ from PySide2.QtWidgets import *
 
 import maya.api.OpenMaya as om
 import pymel.core as pm
-import pymel.api as api
 import maya.cmds as cmds
 
 from shiboken2 import wrapInstance
-mayaMainWindow = wrapInstance(int(api.MQtUtil.mainWindow()), QMainWindow)
+mayaMainWindow = wrapInstance(int(pm.api.MQtUtil.mainWindow()), QMainWindow)
 
 RootDirectory = os.path.dirname(__file__)
 
+NamingScheme = {
+    "LeftStart": {"L_": "R_", "l_": "r_", "Left":"Right", "left_": "right_"},
+    "LeftEnd": {"_L": "_R", "_l": "_r", "Left": "Right", "_left":"_right"},
+    "RightStart": {"R_": "L_", "r_": "l_", "Right":"Left", "right_":"left_"},
+    "RightEnd": {"_R": "_L", "_r": "_l", "Right":"Left", "_right":"_left"},
+    "LeftMiddle": {"Left":"Right", "_L_":"_R_", "_l_":"_r_"},
+    "RightMiddle": {"Right":"Left", "_R_":"_L_", "_r_":"_l_"},
+}
+
 def findSymmetricName(name, left=True, right=True):
-    L_starts = {"L_": "R_", "l_": "r_", "Left":"Right", "left_": "right_"}
-    L_ends = {"_L": "_R", "_l": "_r", "Left": "Right", "_left":"_right"}
+    leftData = (left, NamingScheme["LeftStart"], NamingScheme["LeftMiddle"], NamingScheme["LeftEnd"])
+    rightData = (right, NamingScheme["RightStart"], NamingScheme["RightMiddle"], NamingScheme["RightEnd"])
 
-    R_starts = {"R_": "L_", "r_": "l_", "Right":"Left", "right_":"left_"}
-    R_ends = {"_R": "_L", "_r": "_l", "Right":"Left", "_right":"_left"}
-
-    for enable, starts, ends in [(left, L_starts, L_ends), (right, R_starts, R_ends)]:
+    for enable, starts, mids, ends in [leftData, rightData]:
         if enable:
             for s in starts:
                 if name.startswith(s):
@@ -34,11 +39,36 @@ def findSymmetricName(name, left=True, right=True):
                 if name.endswith(s):
                     return name[:-len(s)] + ends[s]
 
-    return name
+            for s in mids:
+                if s in name:
+                    idx = name.index(s)
+                    return name[:idx] + mids[s] + name[idx+len(s):]
 
-def findSymmetricObject(ctrl, left=True, right=True):
-    ctrl_mirrored = findSymmetricName(ctrl.name(), left, right)
-    return pm.PyNode(ctrl_mirrored) if cmds.objExists(ctrl_mirrored) else ctrl
+def isLeftSide(name):
+    for s in NamingScheme["LeftStart"]:
+        if name.startswith(s):
+            return True
+
+    for s in NamingScheme["LeftEnd"]:
+        if name.endswith(s):
+            return True
+
+    for s in NamingScheme["LeftMiddle"]:
+        if s in name:
+            return True
+
+def isRightSide(name):
+    for s in NamingScheme["RightStart"]:
+        if name.startswith(s):
+            return True
+
+    for s in NamingScheme["RightEnd"]:
+        if name.endswith(s):
+            return True
+
+    for s in NamingScheme["RightMiddle"]:
+        if s in name:
+            return True
 
 def clamp(v, mn=0.0, mx=1.0):
     if v > mx:
@@ -48,120 +78,141 @@ def clamp(v, mn=0.0, mx=1.0):
     return v
 
 def shortenValue(v, epsilon=1e-5):
-    return 0 if abs(v) < epsilon else v
-
-def set_matrixRC(m, r, c, v):
-    api.MScriptUtil.setDoubleArray( m[r], c, v)
-
-def set_maxis(m, a, v):
-    set_matrixRC(m, a, 0, v.x)
-    set_matrixRC(m, a, 1, v.y)
-    set_matrixRC(m, a, 2, v.z)
+    roundedValue = round(v)
+    return roundedValue if abs(v - roundedValue) < epsilon else v
 
 def maxis(m, a):
-    return api.MVector(m(a,0), m(a,1), m(a,2))
+    return om.MVector(m[a*4+0], m[a*4+1], m[a*4+2])
+
+def set_maxis(m, a, v):
+    m[a*4+0] = v[0]
+    m[a*4+1] = v[1]
+    m[a*4+2] = v[2]
+
+def mscale(m):
+    return om.MVector(maxis(m,0).length(), maxis(m,1).length(), maxis(m,2).length())
+
+def set_mscale(m, s):
+    set_maxis(m, 0, maxis(m, 0).normal()*s[0])
+    set_maxis(m, 1, maxis(m, 1).normal()*s[1])
+    set_maxis(m, 2, maxis(m, 2).normal()*s[2])
+
+def mscaled(m, s=om.MVector(1,1,1)):
+    m = om.MMatrix(m)
+    set_maxis(m, 0, maxis(m, 0).normal()*s[0])
+    set_maxis(m, 1, maxis(m, 1).normal()*s[1])
+    set_maxis(m, 2, maxis(m, 2).normal()*s[2])
+    return m
+
+def slerp(q1, q2, w):
+    q1 = om.MQuaternion(q1[0], q1[1], q1[2], q1[3])
+    q2 = om.MQuaternion(q2[0], q2[1], q2[2], q2[3])
+    return om.MQuaternion.slerp(q1, q2, w)
+
+def blendMatrices(m1, m2, w):
+    m1 = om.MMatrix(m1)
+    m2 = om.MMatrix(m2)
+
+    q1 = om.MTransformationMatrix(mscaled(m1)).rotation().asQuaternion()
+    q2 = om.MTransformationMatrix(mscaled(m2)).rotation().asQuaternion()
+
+    s = mscale(m1) * (1-w) + mscale(m2) * w
+    m = om.MMatrix(mscaled(slerp(q1, q2, w).asMatrix(), s))
+
+    set_maxis(m, 3, maxis(m1, 3)*(1-w) + maxis(m2, 3)*w)
+    return m
 
 def getLocalMatrix(joint):
     '''
     Get joint local matrix: t, r*jo, s
     '''
-    q = api.MQuaternion(joint.getRotation().asQuaternion())
+    q = om.MQuaternion(joint.getRotation().asQuaternion())
+
     if isinstance(joint, pm.nt.Joint):
-        q *= api.MQuaternion(joint.getOrientation()) # second one applies first for quats
+        q *= om.MQuaternion(joint.getOrientation())
+
+    t = cmds.getAttr(joint+".t")[0]
+    s = cmds.getAttr(joint+".s")[0]
 
     qm = q.asMatrix()
 
-    sm = api.MMatrix()
-    set_matrixRC(sm, 0, 0, pm.getAttr(joint+".sx"))
-    set_matrixRC(sm, 1, 1, pm.getAttr(joint+".sy"))
-    set_matrixRC(sm, 2, 2, pm.getAttr(joint+".sz"))
+    sm = om.MMatrix()
+    sm[0] = s[0]
+    sm[5] = s[1]
+    sm[10] = s[2]
 
     m = sm * qm
-    set_matrixRC(m, 3, 0, pm.getAttr(joint+".tx"))
-    set_matrixRC(m, 3, 1, pm.getAttr(joint+".ty"))
-    set_matrixRC(m, 3, 2, pm.getAttr(joint+".tz"))
+    m[12] = t[0]
+    m[13] = t[1]
+    m[14] = t[2]
 
-    return pm.dt.Matrix(m)
+    return om.MMatrix(m)
 
-def matrixScale(m):
-    m = api.MMatrix(m)
-    return pm.dt.Vector(maxis(m, 0).length(), maxis(m, 1).length(), maxis(m, 2).length())
+def getDelta(m, bm): # get delta matrix from pose world matrix
+    m = om.MMatrix(m)
+    bm = om.MMatrix(bm)
 
-def scaledMatrix(m, scale=pm.dt.Vector(1,1,1)):
-    m = api.MMatrix(m)
-    out = api.MMatrix()
+    s = mscale(m)
+    bs = mscale(bm)
 
-    xaxis = pm.dt.Vector(m(0,0), m(0,1), m(0,2)).normal() * scale.x
-    yaxis = pm.dt.Vector(m(1,0), m(1,1), m(1,2)).normal() * scale.y
-    zaxis = pm.dt.Vector(m(2,0), m(2,1), m(2,2)).normal() * scale.z
+    d = m * bm.inverse()
 
-    set_maxis(out, 0, xaxis)
-    set_maxis(out, 1, yaxis)
-    set_maxis(out, 2, zaxis)
-    set_maxis(out, 3, maxis(m, 3))
-    return pm.dt.Matrix(out)
+    # translation is simple as well as scale
+    d[12] = m[12]-bm[12]
+    d[13] = m[13]-bm[13]
+    d[14] = m[14]-bm[14]
 
-def slerp(q1, q2, w):
-    q = om.MQuaternion.slerp(om.MQuaternion(q1.x, q1.y, q1.z, q1.w),
-                             om.MQuaternion(q2.x, q2.y, q2.z, q2.w), w)
-    return pm.dt.Quaternion(q.x, q.y, q.z, q.w)
+    sx = s[0]/bs[0]
+    sy = s[1]/bs[1]
+    sz = s[2]/bs[2]
+    set_mscale(d, [sx,sy,sz])
+    return d
 
-def blendMatrices(m1, m2, w):
-    m1 = api.MMatrix(m1)
-    m2 = api.MMatrix(m2)
+def applyDelta(dm, bm):
+    dm = om.MMatrix(dm)
+    bm = om.MMatrix(bm)
 
-    q1 = api.MTransformationMatrix(scaledMatrix(m1)).rotation()
-    q2 = api.MTransformationMatrix(scaledMatrix(m2)).rotation()
+    ds = mscale(dm)
+    bms = mscale(bm)
 
-    s = matrixScale(m1) * (1-w) + matrixScale(m2) * w
-    m = api.MMatrix(scaledMatrix(slerp(q1, q2, w).asMatrix(), s))
+    m = dm * bm # get rotation matrix
 
-    set_maxis(m, 3, maxis(m1, 3)*(1-w) + maxis(m2, 3)*w)
-    return pm.dt.Matrix(m)
+    # translation is simple as well as scale
+    m[12] = bm[12]+dm[12]
+    m[13] = bm[13]+dm[13]
+    m[14] = bm[14]+dm[14]
 
-def symmat(m):
-    out = api.MMatrix(m)
-    set_matrixRC(out, 0, 0, -1 * out(0,0))
-    set_matrixRC(out, 1, 0, -1 * out(1,0))
-    set_matrixRC(out, 2, 0, -1 * out(2,0))
-    set_matrixRC(out, 3, 0, -1 * out(3,0))
-    return pm.dt.Matrix(out)
+    sx = ds[0]*bms[0]
+    sy = ds[1]*bms[1]
+    sz = ds[2]*bms[2]
 
-def getDelta(mat, baseMat, parentMat, blendMode): # get delta matrix from pose world matrix
-    mat = api.MMatrix(mat)
-    baseMat = api.MMatrix(baseMat)
-    parentMat = api.MMatrix(parentMat)
+    set_mscale(m, [sx, sy, sz])
+    return m
 
-    if blendMode == 0:
-        offset = maxis(mat, 3) - maxis(baseMat, 3)
-        offset *= parentMat.inverse()
+def symmat(m): # flip x axis
+    out = om.MMatrix(m)
+    out[0] *= -1
+    out[4] *= -1
+    out[8] *= -1
+    out[12] *= -1
+    return out
 
-        m = mat * baseMat.inverse()
-        set_maxis(m, 3, offset)
-
-    elif blendMode == 1:
-        m = mat * parentMat.inverse()
-
-    return pm.dt.Matrix(m)
-
-def applyDelta(delta, baseMat, parentMat, blendMode): # apply delta and get pose world matrix
-    delta = api.MMatrix(delta)
-    baseMat = api.MMatrix(baseMat)
-    parentMat = api.MMatrix(parentMat)
-
-    if blendMode == 0:
-        offset = maxis(delta,3) * parentMat
-
-        m = delta * baseMat
-        set_maxis(m, 3, maxis(baseMat, 3) + offset)
-
-    elif blendMode == 1:
-        m = delta * parentMat
-
-    return pm.dt.Matrix(m)
-
-def parentConstraintMatrix(srcBase, src, destBase):
+def parentConstraintMatrix(destBase, srcBase, src):
     return destBase * srcBase.inverse() * src
+
+def mirrorMatrix(base, srcBase, src):
+    return parentConstraintMatrix(base, symmat(srcBase), symmat(src))
+
+def mirrorMatrixByDelta(srcBase, src, destBase):
+    mirroredSrcBase = mirrorMatrix(om.MMatrix(), om.MMatrix(), srcBase)
+    mirroredSrc = mirrorMatrix(om.MMatrix(), om.MMatrix(), src)
+
+    # set translation the same, used for rotation
+    dt = maxis(mirroredSrcBase,3) - maxis(destBase,3)
+    set_maxis(mirroredSrc, 3, maxis(mirroredSrc, 3) - dt)
+    set_maxis(mirroredSrcBase, 3, maxis(mirroredSrcBase, 3) - dt)
+
+    return parentConstraintMatrix(destBase, mirroredSrcBase, mirroredSrc)
 
 def dagPose_findIndex(dagPose, j):
     for m in dagPose.members:
@@ -172,15 +223,15 @@ def dagPose_findIndex(dagPose, j):
 def dagPose_getWorldMatrix(dagPose, j):
     idx = dagPose_findIndex(dagPose, j)
     if idx is not None:
-        return dagPose.worldMatrix[idx].get()
+        return om.MMatrix(dagPose.worldMatrix[idx].get())
 
 def dagPose_getParentMatrix(dagPose, j):
     idx = dagPose_findIndex(dagPose, j)
     if idx is not None:
         parent = dagPose.parents[idx].inputs(p=True, sh=True)
         if parent and parent[0] != dagPose.world:
-            return dagPose.worldMatrix[parent[0].index()].get()
-    return pm.dt.Matrix()
+            return om.MMatrix(dagPose.worldMatrix[parent[0].index()].get())
+    return om.MMatrix()
 
 def getRemapInputPlug(remap):
     inputs = remap.inputValue.inputs(p=True)
@@ -237,10 +288,10 @@ def getBlendShapeTargetDelta(blendShape, targetIndex):
     targetComponentsPlug = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputComponentsTarget.__apimplug__()
 
     targetIndices = []
-    componentList = api.MFnComponentListData(targetComponentsPlug.asMObject())
+    componentList = pm.api.MFnComponentListData(targetComponentsPlug.asMObject())
     for i in range(componentList.length()):
-        compTargetIndices = api.MIntArray()
-        singleIndexFn = api.MFnSingleIndexedComponent(componentList[i])
+        compTargetIndices = pm.api.MIntArray()
+        singleIndexFn = pm.api.MFnSingleIndexedComponent(componentList[i])
         singleIndexFn.getElements(compTargetIndices)
         targetIndices += compTargetIndices
 
@@ -582,27 +633,31 @@ class Skeleposer(object):
         for j in joints:
             idx = self.getJointIndex(j)
 
-            j_mirrored = findSymmetricObject(j, right=False) # don't mirror from right joints to left ones
-            if j == j_mirrored:
+            j_mirrored = findSymmetricName(str(j), right=False) # find right side joint
+            if not j_mirrored or not cmds.objExists(j_mirrored):
                 continue
 
+            j_mirrored = pm.PyNode(j_mirrored)
+
             mirror_idx = self.getJointIndex(j_mirrored)
+            if mirror_idx is None: # if mirror joint is not connected, skip
+                continue
 
             j_mbase = dagPose_getWorldMatrix(dagPose, j) # get base world matrices
             mirrored_mbase = dagPose_getWorldMatrix(dagPose, j_mirrored)
 
-            j_pm = dagPose_getParentMatrix(dagPose, j) or j.pm.get()
-            mirrored_pm = dagPose_getParentMatrix(dagPose, j_mirrored) or j_mirrored.pm.get()
+            j_pmat = dagPose_getParentMatrix(dagPose, j)
+            mirrored_pmat = dagPose_getParentMatrix(dagPose, j_mirrored)
 
             delta = self.node.poses[poseIndex].poseDeltaMatrices[idx].get()
-            jm = applyDelta(delta, j_mbase, j_pm, blendMode)
+            jm = applyDelta(delta, j_mbase) if blendMode == 0 else om.MMatrix(delta) * j_pmat
 
-            mirrored_m = parentConstraintMatrix(symmat(j_mbase), symmat(jm), mirrored_mbase)
+            mirrored_m = mirrorMatrixByDelta(j_mbase, jm, mirrored_mbase)
 
             if j == j_mirrored:
                 mirrored_m = blendMatrices(jm, mirrored_m, 0.5)
 
-            self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].set(getDelta(mirrored_m, mirrored_mbase, mirrored_pm, blendMode))
+            self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].set(getDelta(mirrored_m, mirrored_mbase) if blendMode == 0 else mirrored_m * mirrored_pmat.inverse())
 
     def flipPose(self, poseIndex):
         dagPose = self.dagPose()
@@ -613,23 +668,36 @@ class Skeleposer(object):
         for j in self.getPoseJoints(poseIndex):
             idx = self.getJointIndex(j)
 
-            j_mirrored = findSymmetricObject(j)
+            j_mirrored = findSymmetricName(str(j))
+            if not j_mirrored or not cmds.objExists(j_mirrored):
+                continue
+
+            j_mirrored = pm.PyNode(j_mirrored)
+
             mirror_idx = self.getJointIndex(j_mirrored)
+            if mirror_idx is None: # if mirror joint is not connected, skip
+                continue
 
             j_mbase = dagPose_getWorldMatrix(dagPose, j)
             mirrored_mbase = dagPose_getWorldMatrix(dagPose, j_mirrored)
 
-            j_pm = dagPose_getParentMatrix(dagPose, j) or j.pm.get()
-            mirrored_pm = dagPose_getParentMatrix(dagPose, j_mirrored) or j_mirrored.pm.get()
+            j_pmat = dagPose_getParentMatrix(dagPose, j)
+            mirrored_pmat = dagPose_getParentMatrix(dagPose, j_mirrored)
 
-            jm = applyDelta(self.node.poses[poseIndex].poseDeltaMatrices[idx].get(),  j_mbase, j_pm, blendMode)
-            mirrored_jm = applyDelta(self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].get(), mirrored_mbase, mirrored_pm, blendMode)
+            j_delta = self.node.poses[poseIndex].poseDeltaMatrices[idx].get()
+            mirrored_delta = self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].get()
 
-            m = parentConstraintMatrix(symmat(mirrored_mbase), symmat(mirrored_jm), j_mbase)
-            mirrored_m = parentConstraintMatrix(symmat(j_mbase), symmat(jm), mirrored_mbase)
+            jm = applyDelta(j_delta, j_mbase) if blendMode == 0 else om.MMatrix(j_delta) * j_pmat
+            mirrored_jm = applyDelta(mirrored_delta, mirrored_mbase) if blendMode == 0 else om.MMatrix(mirrored_delta) * mirrored_pmat
 
-            output[idx] = getDelta(m, j_mbase, j_pm, blendMode)
-            output[mirror_idx] = getDelta(mirrored_m, mirrored_mbase, mirrored_pm, blendMode)
+            j_pmat = dagPose_getParentMatrix(dagPose, j)
+            mirrored_pmat = dagPose_getParentMatrix(dagPose, j_mirrored)
+
+            m = mirrorMatrixByDelta(mirrored_mbase, mirrored_jm, j_mbase)
+            mirrored_m = mirrorMatrixByDelta(j_mbase, jm, mirrored_mbase)
+
+            output[idx] = getDelta(m, j_mbase) if blendMode == 0 else m * j_pmat.inverse()
+            output[mirror_idx] = getDelta(mirrored_m, mirrored_mbase) if blendMode == 0 else mirrored_m * mirrored_pmat.inverse()
 
         for idx in output:
             self.node.poses[poseIndex].poseDeltaMatrices[idx].set(output[idx])
@@ -645,11 +713,11 @@ class Skeleposer(object):
         for j in self.getPoseJoints(poseIndex):
             idx = self.getJointIndex(j)
 
-            delta = pose.poseDeltaMatrices[idx].get()
+            delta = om.MMatrix(pose.poseDeltaMatrices[idx].get())
             bmat = dagPose_getWorldMatrix(dagPose, j)
             pmat = dagPose_getParentMatrix(dagPose, j)
-            wm = applyDelta(delta, bmat, pmat, poseBlend)
-            pose.poseDeltaMatrices[idx].set(getDelta(wm, bmat, pmat, blend))
+            wm = applyDelta(delta, bmat) if poseBlend == 0 else delta * pmat
+            pose.poseDeltaMatrices[idx].set(getDelta(wm, bmat) if blend == 0 else wm * pmat.inverse())
 
         pose.poseBlendMode.set(blend)
 
@@ -726,26 +794,17 @@ class Skeleposer(object):
         for j in self.getJoints():
             jointIndex = self.getJointIndex(j)
 
-            if self.checkIfApplyCorrect():
-                baseMatrix = self._editPoseData["joints"][j.name()]
-            else:
-                baseMatrix = self.node.baseMatrices[jointIndex].get()
+            bmat = self._editPoseData["joints"][j.name()]
 
-            jmat = getLocalMatrix(j)
-            if not jmat.isEquivalent(baseMatrix, 1e-4):
+            mat = getLocalMatrix(j)
+            if not mat.isEquivalent(bmat, 1e-4):
                 poseBlendMode = pose.poseBlendMode.get()
 
                 if poseBlendMode == 0: # additive
-                    m = getDelta(scaledMatrix(jmat), scaledMatrix(baseMatrix), pm.dt.Matrix(), poseBlendMode)
-
-                    j_scale = matrixScale(jmat)
-                    baseMatrix_scale = matrixScale(baseMatrix)
-                    m_scale = pm.dt.Vector(j_scale.x / baseMatrix_scale.x, j_scale.y / baseMatrix_scale.y, j_scale.z / baseMatrix_scale.z)
-
-                    pose.poseDeltaMatrices[jointIndex].set(scaledMatrix(m, m_scale))
+                    pose.poseDeltaMatrices[jointIndex].set(getDelta(mat, bmat))
 
                 elif poseBlendMode == 1: # replace
-                    pose.poseDeltaMatrices[jointIndex].set(jmat)
+                    pose.poseDeltaMatrices[jointIndex].set(mat)
 
             else:
                 pm.removeMultiInstance(pose.poseDeltaMatrices[jointIndex], b=True)
@@ -758,9 +817,6 @@ class Skeleposer(object):
 
     def findActivePoseIndex(self, value=0.01):
         return [p.index() for p in self.node.poses if p.poseWeight.get() > value]
-
-    def checkIfApplyCorrect(self):
-        return len(self.findActivePoseIndex()) > 1 # true if two or more poses actived
 
     def getDirectoryData(self, idx=0):
         data = {"directoryIndex":idx, "children":[]}
@@ -803,7 +859,7 @@ class Skeleposer(object):
                     w = kwargs[pattern]
                     pdm = destPose.poseDeltaMatrices[j_idx]
                     if w > 1e-3:
-                        pdm.set( blendMatrices(pm.dt.Matrix(), pdm.get(), w) )
+                        pdm.set( blendMatrices(om.MMatrix(), om.MMatrix(pdm.get()), w) )
                     else:
                         pm.removeMultiInstance(pdm, b=True)
 
@@ -820,8 +876,8 @@ class Skeleposer(object):
 
         blendShape.envelope.set(0) # turn off blendShapes
 
-        basePoints = api.MPointArray()
-        meshFn = api.MFnMesh(mesh.__apimdagpath__())
+        basePoints = pm.api.MPointArray()
+        meshFn = pm.api.MFnMesh(mesh.__apimdagpath__())
         meshFn.getPoints(basePoints)
 
         offsetsList = []
@@ -836,7 +892,7 @@ class Skeleposer(object):
                     pm.disconnectAttr(inputs[0], pose.poseWeight)
                 pose.poseWeight.set(1)
 
-                points = api.MPointArray()
+                points = pm.api.MPointArray()
                 meshFn.getPoints(points)
 
                 offsets = [0]*points.length()
@@ -1047,7 +1103,8 @@ class Skeleposer(object):
                 jdata = jointsData[delta.index()]
 
                 if not joints or jdata["joint"] in joints:
-                    wm = applyDelta(delta.get(), jdata["baseMatrix"], jdata["parentMatrix"], blendMode)
+                    dm = delta.get()
+                    wm = applyDelta(dm, jdata["baseMatrix"]) if blendMode == 0 else om.MMatrix(dm) * jdata["parentMatrix"]
                     deltas[delta.index()] = wm.tolist()
 
             if deltas:
@@ -1066,14 +1123,14 @@ class Skeleposer(object):
 
             bmat = dagPose_getWorldMatrix(dagPose, j)
             pmat = dagPose_getParentMatrix(dagPose, j)
-            jointsData[idx] = {"joint":j, "baseMatrix":bmat, "parentMatrix":pmat}
+            jointsData[idx] = {"joint":j, "baseMatrix":bmat, "parentInverseMatrix":pmat.inverse()}
 
         for pi in poses:
             blendMode = self.node.poses[pi].poseBlendMode.get()
 
             for di in poses[pi]:
                 jdata = jointsData[di]
-                delta = getDelta(pm.dt.Matrix(poses[pi][di]), jdata["baseMatrix"], jdata["parentMatrix"], blendMode)
+                delta = getDelta(poses[pi][di], jdata["baseMatrix"]) if blendMode == 0 else om.MMatrix(poses[pi][di]) * jdata["parentInverseMatrix"]                                    
                 self.node.poses[pi].poseDeltaMatrices[di].set(delta)
 
 ####################################################################################
@@ -1453,11 +1510,11 @@ class TreeWidget(QTreeWidget):
 
         menu.addMenu(connectionsMenu)
 
-        menu.addAction("Update base matrices", self.updateBaseMatrices)
+        menu.addAction("Update base matrices", skel.updateBaseMatrices)
 
         fileMenu = QMenu("File", self)
-        fileMenu.addAction("Save", self.saveSkeleposer())
-        fileMenu.addAction("Load", self.loadSkeleposer())
+        fileMenu.addAction("Save", self.saveSkeleposer)
+        fileMenu.addAction("Load", self.loadSkeleposer)
 
         menu.addMenu(fileMenu)
 
@@ -1826,16 +1883,18 @@ class ToolsWidget(QWidget):
         joints = sorted(pm.ls(sl=True, type=["joint", "transform"]), key=lambda j: len(j.getAllParents())) # sort by parents number, process parents first
 
         for L_joint in joints:
-            R_joint = findSymmetricObject(L_joint, right=False) # search only for left joints
-            if L_joint == R_joint:
+            R_joint = findSymmetricName(str(L_joint), right=False) # skip right joints
+            if not R_joint or not cmds.objExists(R_joint):
                 continue
 
-            L_m = L_joint.wm.get()
+            R_joint = pm.PyNode(R_joint)
+
+            L_m = om.MMatrix(L_joint.wm.get())
 
             L_base = dagPose_getWorldMatrix(dagPose, L_joint)
             R_base = dagPose_getWorldMatrix(dagPose, R_joint)
 
-            R_m = parentConstraintMatrix(symmat(L_base), symmat(L_m), R_base)
+            R_m = mirrorMatrixByDelta(L_base, L_m, R_base)
             pm.xform(R_joint, ws=True, m=R_m)
 
 class NodeSelectorWidget(QWidget):
@@ -2266,7 +2325,7 @@ class SplitPoseWidget(QWidget):
         applyLayout.setStretch(1, 1)
 
         hsplitter.addWidget(self.posesWidget)
-        hsplitter.addWidget(self.patternsWidget)        
+        hsplitter.addWidget(self.patternsWidget)
         layout.addWidget(hsplitter)
         layout.addLayout(blendLayout)
         layout.addLayout(applyLayout)
