@@ -25,6 +25,10 @@ NamingScheme = {
     "RightMiddle": {"Right":"Left", "_R_":"_L_", "_r_":"_l_"},
 }
 
+def getQWidgetFromMelControl(ctrl):
+    ptr = pm.api.MQtUtil.findControl(ctrl)
+    return wrapInstance(int(ptr), QWidget)
+
 def findSymmetricName(name, left=True, right=True):
     leftData = (left, NamingScheme["LeftStart"], NamingScheme["LeftMiddle"], NamingScheme["LeftEnd"])
     rightData = (right, NamingScheme["RightStart"], NamingScheme["RightMiddle"], NamingScheme["RightEnd"])
@@ -397,6 +401,7 @@ class Skeleposer(object):
                 pm.removeMultiInstance(self.node.poses[poseIndex].poseDeltaMatrices[idx], b=True)
                 j.setMatrix(self.node.baseMatrices[idx].get())
 
+    @undoBlock
     def updateBaseMatrices(self):
         for ja in self.node.joints:
             inputs = ja.inputs()
@@ -1130,7 +1135,7 @@ class Skeleposer(object):
 
             for di in poses[pi]:
                 jdata = jointsData[di]
-                delta = getDelta(poses[pi][di], jdata["baseMatrix"]) if blendMode == 0 else om.MMatrix(poses[pi][di]) * jdata["parentInverseMatrix"]                                    
+                delta = getDelta(poses[pi][di], jdata["baseMatrix"]) if blendMode == 0 else om.MMatrix(poses[pi][di]) * jdata["parentInverseMatrix"]
                 self.node.poses[pi].poseDeltaMatrices[di].set(delta)
 
 ####################################################################################
@@ -1159,24 +1164,14 @@ def setItemWidgets(item):
     tw = item.treeWidget()
 
     if item.directoryIndex is not None:
-        attrWidget = pm.attrFieldSliderGrp(at=skel.node.directories[item.directoryIndex].directoryWeight, min=0, max=1, l="", pre=2, cw3=[0,40,100])
-        w = attrWidget.asQtObject()
-
-        for ch in w.children():
-            if isinstance(ch, QSlider):
-                ch.setStyleSheet("background-color: #333333; border: 1px solid #555555")
-
-        tw.setItemWidget(item, 1, w)
+        attrWidget = getQWidgetFromMelControl(cmds.attrFieldSliderGrp(at=skel.node.directories[item.directoryIndex].directoryWeight.name(), min=0, max=1, l="", pre=2, cw3=[0,40,100]))
+        attrWidget.children()[3].setStyleSheet("background-color: #333333; border: 1px solid #555555")
+        tw.setItemWidget(item, 1, attrWidget)
 
     elif item.poseIndex is not None:
-        attrWidget = pm.attrFieldSliderGrp(at=skel.node.poses[item.poseIndex].poseWeight,min=0, max=2, smn=0, smx=1, l="", pre=2, cw3=[0,40,100])
-        w = attrWidget.asQtObject()
-
-        for ch in w.children():
-            if isinstance(ch, QSlider):
-                ch.setStyleSheet("background-color: #333333; border: 1px solid #555555")
-
-        tw.setItemWidget(item, 1, w)
+        attrWidget = getQWidgetFromMelControl(cmds.attrFieldSliderGrp(at=skel.node.poses[item.poseIndex].poseWeight.name(),min=0, max=2, smn=0, smx=1, l="", pre=2, cw3=[0,40,100]))
+        attrWidget.children()[3].setStyleSheet("background-color: #333333; border: 1px solid #555555")
+        tw.setItemWidget(item, 1, attrWidget)
 
         editBtn = QPushButton("Edit", parent=tw)
         editBtn.setFixedWidth(50)
@@ -1224,12 +1219,10 @@ def updateItemVisuals(item):
         enabled = skel.node.poses[item.poseIndex].poseEnabled.get()
         blendMode = skel.node.poses[item.poseIndex].poseBlendMode.get()
         if blendMode == 0: # relative
-            item.setBackground(0, QTreeWidgetItem().background(0))
             item.setForeground(0, QColor(200, 200, 200) if enabled else QColor(110, 110,110))
 
         elif blendMode == 1: # replace
-            item.setBackground(0, QColor(140,140,200) if enabled else QColor(50,50,90))
-            item.setForeground(0, QColor(0,0,0) if enabled else QColor(110, 110, 110))
+            item.setForeground(0, QColor(128,128,255) if enabled else QColor(110, 110, 110))
 
         font = item.font(0)
         font.setStrikeOut(False if enabled else True)
@@ -1356,6 +1349,12 @@ class TreeWidget(QTreeWidget):
 
         self.itemChanged.connect(lambda item, idx=None:self.treeItemChanged(item))
 
+    def checkSkeleposer(self):
+        if not skel or not skel.node.exists():
+            pm.warning("Select skeleposer node")
+            return False
+        return True
+
     def addItemsFromSkeleposerData(self, parentItem, skelData):
         for ch in skelData["children"]:
             if isinstance(ch, dict):
@@ -1370,10 +1369,31 @@ class TreeWidget(QTreeWidget):
     def updateTree(self):
         self.clear()
         self.addItemsFromSkeleposerData(self.invisibleRootItem(), skel.getDirectoryData())
-
         for ch in self.getChildrenRecursively(self.invisibleRootItem()):
             setItemWidgets(ch)
 
+    def getChildrenRecursively(self, item, pose=True, directory=True):
+        children = []
+        for i in range(item.childCount()):
+            ch = item.child(i)
+
+            if ch.poseIndex is not None and not pose:
+                continue
+
+            if ch.directoryIndex is not None and not directory:
+                continue
+
+            children.append(ch)
+            children += self.getChildrenRecursively(ch, pose, directory)
+
+        return children
+    
+    def getValidParent(self):
+        selectedItems = self.selectedItems()
+        if selectedItems:
+            last = selectedItems[-1]
+            return last if last.directoryIndex is not None else last.parent()
+            
     @contextmanager
     def keepState(self):
         selectedIndices = [] # poses > 0, directories < 0
@@ -1399,130 +1419,10 @@ class TreeWidget(QTreeWidget):
             (ch.directoryIndex is not None and -ch.directoryIndex in selectedIndices):
                 ch.setSelected(True)
 
-    def keyPressEvent(self, event):
-        shift = event.modifiers() & Qt.ShiftModifier
-        ctrl = event.modifiers() & Qt.ControlModifier
-        alt = event.modifiers() & Qt.AltModifier
-        key = event.key()
-
-        if ctrl:
-            if key == Qt.Key_C:
-                self.copyPoseJointsDelta()
-
-            elif key == Qt.Key_G:
-                self.groupSelected()
-
-            elif key == Qt.Key_V:
-                self.pastePoseDelta()
-
-            elif key == Qt.Key_D:
-                self.duplicateItems()
-
-            elif key == Qt.Key_R:
-                self.searchWindow.show()
-
-            elif key == Qt.Key_M:
-                self.mirrorItems()
-
-            elif key == Qt.Key_F:
-                self.flipItems()
-
-            elif key == Qt.Key_Z:
-                pm.undo()
-
-            elif key == Qt.Key_Space:
-                self.collapseOthers()
-
-        elif key == Qt.Key_Insert:
-            self.makePose("Pose", self.getValidParent())
-
-        elif key == Qt.Key_Space:
-            for item in self.selectedItems():
-                item.setExpanded(not item.isExpanded())
-
-        elif key == Qt.Key_Delete:
-            self.removeItems()
-
-        elif key == Qt.Key_M:
-            self.muteItems()
-
-        else:
-            super(TreeWidget, self).keyPressEvent(event)
-
-    def contextMenuEvent(self, event):
-        if not skel:
-            return
-
-        selectedItems = self.selectedItems()
-
-        menu = QMenu(self)
-
-        if len(selectedItems)>1:
-            menu.addAction("Add corrective pose", self.addCorrectivePose)
-            menu.addAction("Weight from selection", self.weightFromSelection)
-            menu.addAction("Inbetween from selection", self.inbetweenFromSelection)
-            menu.addSeparator()
-
-        elif len(selectedItems)==1:
-            menu.addAction("Add inbetween pose", self.addInbetweenPose)
-            menu.addSeparator()
-
-        menu.addAction("Add pose", lambda: self.makePose("Pose", self.getValidParent()), "Insert")
-        menu.addAction("Group", self.groupSelected, "Ctrl-G")
-
-        if selectedItems:
-            menu.addAction("Duplicate", self.duplicateItems, "Ctrl-D")
-            menu.addAction("Remove", self.removeItems, "Delete")
-
-            menu.addSeparator()
-
-            menu.addAction("Mute", self.muteItems, "m")
-            menu.addAction("Copy delta", self.copyPoseJointsDelta, "Ctrl-C")
-            menu.addAction("Copy selected joints delta", lambda: self.copyPoseJointsDelta(pm.ls(sl=True, type=["joint", "transform"])))
-            pastePoseDeltaAction = menu.addAction("Paste delta", self.pastePoseDelta, "Ctrl-V")
-            pastePoseDeltaAction.setEnabled(True if self.clipboard else False)
-
-            menu.addAction("Mirror", self.mirrorItems, "Ctrl-M")
-            menu.addAction("Flip", self.flipItems, "Ctrl-F")
-            menu.addAction("Flip on opposite pose", self.flipItemsOnOppositePose)
-            menu.addAction("Search/Replace", self.searchWindow.show, "Ctrl-R")
-
-            menu.addSeparator()
-
-            blendMenu = QMenu("Blend mode", self)
-            blendMenu.addAction("Additive", lambda: self.setPoseBlendMode(0))
-            blendMenu.addAction("Replace", lambda: self.setPoseBlendMode(1))
-
-            menu.addMenu(blendMenu)
-
-            menu.addSeparator()
-            menu.addAction("Select changed joints", self.selectChangedJoints)
-            menu.addAction("Reset selected joints", self.resetJoints)
-
-        menu.addSeparator()
-
-        menu.addAction("Collapse others", self.collapseOthers, "Ctrl-Space")
-        menu.addAction("Reset weights", self.resetWeights)
-
-        connectionsMenu = QMenu("Output connections", self)
-        connectionsMenu.addAction("Connect", skel.reconnectOutputs)
-        connectionsMenu.addAction("Disonnect", skel.disconnectOutputs)
-
-        menu.addMenu(connectionsMenu)
-
-        menu.addAction("Update base matrices", skel.updateBaseMatrices)
-
-        fileMenu = QMenu("File", self)
-        fileMenu.addAction("Save", self.saveSkeleposer)
-        fileMenu.addAction("Load", self.loadSkeleposer)
-
-        menu.addMenu(fileMenu)
-
-        menu.addAction("Select node", lambda: pm.select(skel.node))
-
-        menu.popup(event.globalPos())
-
     def loadSkeleposer(self):
+        if not self.checkSkeleposer():
+            return
+        
         path, _ = QFileDialog.getOpenFileName(self, "Import skeleposer", "", "*.json")
         if path:
             with open(path, "r") as f:
@@ -1531,6 +1431,9 @@ class TreeWidget(QTreeWidget):
             self.updateTree()
 
     def saveSkeleposer(self):
+        if not self.checkSkeleposer():
+            return
+
         path, _ = QFileDialog.getSaveFileName(self, "Export skeleposer", "", "*.json")
         if path:
             with open(path, "w") as f:
@@ -1538,6 +1441,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def muteItems(self):
+        if not self.checkSkeleposer():
+            return
+                
         for sel in self.selectedItems():
             if sel.poseIndex is not None:
                 a = skel.node.poses[sel.poseIndex].poseEnabled
@@ -1545,11 +1451,17 @@ class TreeWidget(QTreeWidget):
                 updateItemVisuals(sel)
 
     def searchAndReplace(self, searchText, replaceText):
+        if not self.checkSkeleposer():
+            return
+                
         for sel in self.selectedItems():
             sel.setText(0, sel.text(0).replace(searchText, replaceText))
 
     @undoBlock
     def addInbetweenPose(self):
+        if not self.checkSkeleposer():
+            return
+                
         for sel in self.selectedItems():
             if sel.poseIndex is not None:
                 item = self.makePose(sel.text(0)+"_inbtw", self.getValidParent())
@@ -1558,26 +1470,13 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def setPoseBlendMode(self, blend):
+        if not self.checkSkeleposer():
+            return
+                
         for sel in self.selectedItems():
             if sel.poseIndex is not None:
                 skel.changePoseBlendMode(sel.poseIndex, blend)
                 updateItemVisuals(sel)
-
-    def getChildrenRecursively(self, item, pose=True, directory=True):
-        children = []
-        for i in range(item.childCount()):
-            ch = item.child(i)
-
-            if ch.poseIndex is not None and not pose:
-                continue
-
-            if ch.directoryIndex is not None and not directory:
-                continue
-
-            children.append(ch)
-            children += self.getChildrenRecursively(ch, pose, directory)
-
-        return children
 
     def collapseOthers(self):
         selectedItems = self.selectedItems()
@@ -1595,6 +1494,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def groupSelected(self):
+        if not self.checkSkeleposer():
+            return
+                
         dirItem = self.makeDirectory(parent=self.getValidParent())
 
         for sel in self.selectedItems():
@@ -1605,12 +1507,18 @@ class TreeWidget(QTreeWidget):
         dirItem.setSelected(True)
 
     def copyPoseJointsDelta(self, joints=None):
+        if not self.checkSkeleposer():
+            return
+                
         currentItem = self.currentItem()
         if currentItem and currentItem.poseIndex is not None:
             self.clipboard = {"poseIndex": currentItem.poseIndex, "joints":joints}
 
     @undoBlock
     def pastePoseDelta(self):
+        if not self.checkSkeleposer():
+            return
+                
         if self.clipboard:
             currentItem = self.currentItem()
             if currentItem and currentItem.poseIndex is not None:
@@ -1618,6 +1526,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def flipItemsOnOppositePose(self, items=None):
+        if not self.checkSkeleposer():
+            return
+                
         selectedItems = self.selectedItems()
         if not selectedItems and not items:
             return
@@ -1647,6 +1558,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def mirrorItems(self, items=None):
+        if not self.checkSkeleposer():
+            return
+                
         for sel in items or self.selectedItems():
             if sel.poseIndex is not None:
                 skel.mirrorPose(sel.poseIndex)
@@ -1656,6 +1570,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def flipItems(self, items=None):
+        if not self.checkSkeleposer():
+            return
+                
         for sel in items or self.selectedItems():
             if sel.poseIndex is not None:
                 skel.flipPose(sel.poseIndex)
@@ -1665,25 +1582,28 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def resetWeights(self):
+        if not self.checkSkeleposer():
+            return
+                
         for p in skel.node.poses:
             if p.poseWeight.isSettable():
                 p.poseWeight.set(0)
 
     @undoBlock
     def resetJoints(self):
+        if not self.checkSkeleposer():
+            return
+                
         joints = pm.ls(sl=True, type=["joint", "transform"])
         for sel in self.selectedItems():
             if sel.poseIndex is not None:
                 skel.resetDelta(sel.poseIndex, joints)
 
-    def selectChangedJoints(self):
-        pm.select(cl=True)
-        for sel in self.selectedItems():
-            if sel.poseIndex is not None:
-                pm.select(skel.getPoseJoints(sel.poseIndex), add=True)
-
     @undoBlock
     def duplicateItems(self, items=None, parent=None):
+        if not self.checkSkeleposer():
+            return
+                
         parent = parent or self.getValidParent()
         for item in items or self.selectedItems():
             if item.poseIndex is not None:
@@ -1697,7 +1617,10 @@ class TreeWidget(QTreeWidget):
                     self.duplicateItems([item.child(i)], newItem)
 
     @undoBlock
-    def weightFromSelection(self):
+    def setupWeightFromSelection(self):
+        if not self.checkSkeleposer():
+            return
+                
         currentItem = self.currentItem()
         if currentItem and currentItem.poseIndex is not None:
             indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None and item is not currentItem]
@@ -1705,7 +1628,10 @@ class TreeWidget(QTreeWidget):
             setItemWidgets(currentItem)
 
     @undoBlock
-    def inbetweenFromSelection(self):
+    def createInbetweenFromSelection(self):
+        if not self.checkSkeleposer():
+            return
+                
         currentItem = self.currentItem()
         if currentItem and currentItem.poseIndex is not None:
             indices = [item.poseIndex for item in self.selectedItems() if item.poseIndex is not None and item is not currentItem]
@@ -1714,6 +1640,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def addCorrectivePose(self):
+        if not self.checkSkeleposer():
+            return
+                
         selectedItems = self.selectedItems()
         if selectedItems:
             indices = [item.poseIndex for item in selectedItems if item.poseIndex is not None]
@@ -1725,6 +1654,9 @@ class TreeWidget(QTreeWidget):
 
     @undoBlock
     def removeItems(self):
+        if not self.checkSkeleposer():
+            return
+
         for item in self.selectedItems():
             if item.directoryIndex is not None: # remove directory
                 skel.removeDirectory(item.directoryIndex)
@@ -1734,13 +1666,10 @@ class TreeWidget(QTreeWidget):
                 skel.removePose(item.poseIndex)
                 (item.parent() or self.invisibleRootItem()).removeChild(item)
 
-    def getValidParent(self):
-        selectedItems = self.selectedItems()
-        if selectedItems:
-            last = selectedItems[-1]
-            return last if last.directoryIndex is not None else last.parent()
-
     def makePose(self, name="Pose", parent=None):
+        if not self.checkSkeleposer():
+            return
+
         idx = skel.makePose(name)
         item = makePoseItem(idx)
 
@@ -1754,6 +1683,9 @@ class TreeWidget(QTreeWidget):
         return item
 
     def makeDirectory(self, name="Group", parent=None):
+        if not self.checkSkeleposer():
+            return
+                
         parentIndex = parent.directoryIndex if parent else 0
         idx = skel.makeDirectory(name, parentIndex)
 
@@ -1762,6 +1694,56 @@ class TreeWidget(QTreeWidget):
 
         setItemWidgets(item)
         return item
+    
+    @undoBlock
+    def addJoints(self):
+        if not self.checkSkeleposer():
+            return
+                
+        ls = pm.ls(sl=True, type=["joint", "transform"])
+        if ls:
+            skel.addJoints(ls)
+        else:
+            pm.warning("Select joints to add")
+
+    @undoBlock
+    def removeJoints(self):
+        if not self.checkSkeleposer():
+            return
+        
+        ls = pm.ls(sl=True, type=["joint", "transform"])
+        if ls:
+            skel.removeJoints(ls)
+        else:
+            pm.warning("Select joints to remove")    
+
+    def addJointsAsLayer(self):
+        if not self.checkSkeleposer():
+            return
+                
+        ls = pm.ls(sl=True, type=["joint", "transform"])
+        if ls:
+            skel.addJointsAsLayer(ls[0])
+        else:
+            pm.warning("Select root joint to add as a layer")                
+    
+    def reconnectOutputs(self):
+        if not self.checkSkeleposer():
+            return
+                
+        skel.reconnectOutputs()
+
+    def disconnectOutputs(self):
+        if not self.checkSkeleposer():
+            return
+                
+        skel.disconnectOutputs()
+
+    def updateBaseMatrices(self):
+        if not self.checkSkeleposer():
+            return
+                
+        skel.updateBaseMatrices()
 
     @undoBlock
     def treeItemChanged(self, item):
@@ -2469,33 +2451,6 @@ class SkeleposerWindow(QFrame):
         self.skeleposerSelectorWidget = SkeleposerSelectorWidget()
         self.skeleposerSelectorWidget.nodeChanged.connect(self.selectSkeleposer)
 
-        newBtn = QPushButton()
-        newBtn.setIcon(QIcon(RootDirectory+"/icons/new.png"))
-        newBtn.setToolTip("New skeleposer")
-        newBtn.clicked.connect(self.newNode)
-
-        addJointsBtn = QPushButton()
-        addJointsBtn.setIcon(QIcon(RootDirectory+"/icons/add.png"))
-        addJointsBtn.setToolTip("Add joints to skeleposer")
-        addJointsBtn.clicked.connect(self.addJoints)
-
-        removeJointsBtn = QPushButton()
-        removeJointsBtn.setIcon(QIcon(RootDirectory+"/icons/remove.png"))
-        removeJointsBtn.setToolTip("Remove joints from skeleposer")
-        removeJointsBtn.clicked.connect(self.removeJoints)
-
-        addLayerBtn = QPushButton()
-        addLayerBtn.setIcon(QIcon(RootDirectory+"/icons/layer.png"))
-        addLayerBtn.setToolTip("Add joint hierarchy as layer")
-        addLayerBtn.clicked.connect(self.addJointsAsLayer)
-
-        hlayout = QHBoxLayout()
-        hlayout.addWidget(newBtn)
-        hlayout.addWidget(self.skeleposerSelectorWidget)
-        hlayout.addWidget(addJointsBtn)
-        hlayout.addWidget(removeJointsBtn)
-        hlayout.addWidget(addLayerBtn)
-
         self.treeWidget = TreeWidget()
         self.toolsWidget = ToolsWidget()
         self.toolsWidget.hide()
@@ -2516,16 +2471,83 @@ class SkeleposerWindow(QFrame):
         tabWidget.addTab(hsplitter, "Pose")
         tabWidget.addTab(self.splitPoseWidget, "Split")
 
-        layout.addLayout(hlayout)
+        layout.setMenuBar(self.getMenu())
+        layout.addWidget(self.skeleposerSelectorWidget)
         layout.addWidget(self.toolsWidget)
         layout.addWidget(tabWidget)
 
-    def addJointsAsLayer(self):
-        ls = pm.ls(sl=True, type=["joint", "transform"])
-        if ls:
-            skel.addJointsAsLayer(ls[0])
-        else:
-            pm.warning("Select root joint to add as a layer")
+    def getMenu(self):
+        menu = QMenuBar()
+
+        fileMenu = QMenu("File", self)
+        fileMenu.addAction(QIcon(RootDirectory+"/icons/new.png"), "New", self.newNode)
+        fileMenu.addAction("Save", self.treeWidget.saveSkeleposer)
+        fileMenu.addAction("Load", self.treeWidget.loadSkeleposer)
+        menu.addMenu(fileMenu)
+
+        createMenu = QMenu("Create", self)
+        createMenu.addAction(QIcon(RootDirectory+"/icons/pose.png"), "Add pose", lambda: self.treeWidget.makePose("Pose", self.treeWidget.getValidParent()), "Insert")
+        createMenu.addAction(QIcon(RootDirectory+"/icons/directory.png"), "Group", self.treeWidget.groupSelected, "Ctrl+G")
+        createMenu.addSeparator()
+        createMenu.addAction("Add corrective pose", self.treeWidget.addCorrectivePose)
+        createMenu.addAction("Weight from selection", self.treeWidget.setupWeightFromSelection)
+        createMenu.addAction("Inbetween from selection", self.treeWidget.createInbetweenFromSelection)
+        createMenu.addAction("Add inbetween pose", self.treeWidget.addInbetweenPose)
+        createMenu.addSeparator()
+
+        menu.addMenu(createMenu)
+
+        editMenu = QMenu("Edit", self)
+        editMenu.addAction("Duplicate", self.treeWidget.duplicateItems, "Ctrl+D")
+        editMenu.addAction(QIcon(RootDirectory+"/icons/reset.png"), "Remove", self.treeWidget.removeItems, "Delete")
+
+        editMenu.addSeparator()
+
+        editMenu.addAction(QIcon(RootDirectory+"/icons/mirror.png"), "Mirror", self.treeWidget.mirrorItems, "Ctrl+M")
+        editMenu.addAction("Flip", self.treeWidget.flipItems, "Ctrl+F")
+        editMenu.addAction("Flip on opposite pose", self.treeWidget.flipItemsOnOppositePose, "Ctrl+Alt+F")
+
+        deltaMenu = QMenu("Delta", self)
+        deltaMenu.addAction("Copy", self.treeWidget.copyPoseJointsDelta, "Ctrl+C")
+        deltaMenu.addAction("Copy selected joints", lambda: self.treeWidget.copyPoseJointsDelta(pm.ls(sl=True, type=["joint", "transform"])))
+        deltaMenu.addAction("Paste", self.treeWidget.pastePoseDelta, "Ctrl+V")
+        deltaMenu.addSeparator()
+        deltaMenu.addAction("Reset selected joints", self.treeWidget.resetJoints)
+        editMenu.addMenu(deltaMenu)
+
+        blendMenu = QMenu("Blend mode", self)
+        blendMenu.addAction("Additive", lambda: self.treeWidget.setPoseBlendMode(0))
+        blendMenu.addAction("Replace", lambda: self.treeWidget.setPoseBlendMode(1))
+        editMenu.addMenu(blendMenu)
+
+        editMenu.addSeparator()
+        editMenu.addAction("Mute", self.treeWidget.muteItems, "m")
+        editMenu.addAction("Reset weights", self.treeWidget.resetWeights)
+        menu.addMenu(editMenu)
+
+        bonesMenu = QMenu("Bones", self)
+        bonesMenu.addAction(QIcon(RootDirectory+"/icons/bone.png"), "Add", self.treeWidget.addJoints)
+        bonesMenu.addAction(QIcon(RootDirectory+"/icons/removeBone.png"), "Remove", self.treeWidget.removeJoints)
+        bonesMenu.addSeparator()
+        bonesMenu.addAction("Update base matrices", self.treeWidget.updateBaseMatrices)
+        bonesMenu.addSeparator()
+        menu.addMenu(bonesMenu)    
+
+        toolsMenu = QMenu("Tools", self)
+        toolsMenu.addAction("Replace in names", self.treeWidget.searchWindow.show, "Ctrl+R")
+        toolsMenu.addAction("Collapse others", self.treeWidget.collapseOthers, "Ctrl+Space")
+        toolsMenu.addAction(QIcon(RootDirectory+"/icons/layer.png"), "Add joint hierarchy as layer", self.treeWidget.addJointsAsLayer)
+        
+        connectionsMenu = QMenu("Output connections", self)
+        connectionsMenu.addAction("Connect", self.treeWidget.reconnectOutputs)
+        connectionsMenu.addAction("Disonnect", self.treeWidget.disconnectOutputs)
+        toolsMenu.addMenu(connectionsMenu)
+
+        toolsMenu.addSeparator()
+        toolsMenu.addAction("Select node", lambda: pm.select(skel.node))
+        menu.addMenu(toolsMenu)
+
+        return menu
 
     def treeSelectionChanged(self):
         joints = []
@@ -2539,24 +2561,6 @@ class SkeleposerWindow(QFrame):
         self.jointsListWidget.clearItems()
         self.jointsListWidget.addItems(sorted(poseJoints), bold=True) # pose joints
         self.jointsListWidget.addItems(sorted(allJoints-poseJoints), foreground=QColor(100, 100, 100)) # all joints
-
-    @undoBlock
-    def addJoints(self):
-        if skel:
-            ls = pm.ls(sl=True, type=["joint", "transform"])
-            if ls:
-                skel.addJoints(ls)
-            else:
-                pm.warning("Select joints to add")
-
-    @undoBlock
-    def removeJoints(self):
-        if skel:
-            ls = pm.ls(sl=True, type=["joint", "transform"])
-            if ls:
-                skel.removeJoints(ls)
-            else:
-                pm.warning("Select joints to remove")
 
     def newNode(self):
         self.selectSkeleposer(pm.createNode("skeleposer"))
