@@ -1087,14 +1087,14 @@ def editButtonClicked(btn, item):
     if editPoseIndex is None:
         skel.beginEditPose(item.poseIndex)
         btn.setStyleSheet("background-color: #aaaa55")
-        skeleposerWindow.toolsWidget.show()
+        mainWindow.toolsWidget.show()
 
         editPoseIndex = item.poseIndex
 
     elif editPoseIndex == item.poseIndex:
         skel.endEditPose()
         btn.setStyleSheet("")
-        skeleposerWindow.toolsWidget.hide()
+        mainWindow.toolsWidget.hide()
 
         editPoseIndex = None
 
@@ -1586,7 +1586,7 @@ class TreeWidget(QTreeWidget):
                 self.flipItemsOnOppositePose(self.getChildrenRecursively(sel))
 
         if doUpdateUI:
-            skeleposerWindow.treeWidget.updateTree()
+            mainWindow.treeWidget.updateTree()
 
     @undoBlock
     def mirrorItems(self, items=None):
@@ -2346,8 +2346,8 @@ class SplitPoseWidget(QWidget):
             if pm.objExists(blendShape):
                 splitBlends(rootItem)
 
-        with skeleposerWindow.treeWidget.keepState():
-            skeleposerWindow.treeWidget.updateTree()
+        with mainWindow.treeWidget.keepState():
+            mainWindow.treeWidget.updateTree()
 
     def fromJson(self, data): # [[a, [b, c]]] => a | b | c
         self.posesWidget.fromList(data)
@@ -2544,7 +2544,7 @@ def undoRedoCallback():
     if not skel or not skel.node.exists():
         return
 
-    tree = skeleposerWindow.treeWidget
+    tree = mainWindow.treeWidget
 
     def getSkeleposerState(idx=0):
         data = {"d":idx, "l":skel.node.directories[idx].directoryName.get() or "", "ch":[]}
@@ -2575,7 +2575,7 @@ def undoRedoCallback():
         tree.clear()
         tree.addItemsFromSkeleposerData(tree.invisibleRootItem(), skel.getDirectoryData())
 
-    skeleposerWindow.splitPoseWidget.loadFromSkeleposer()
+    mainWindow.splitPoseWidget.loadFromSkeleposer()
 
 pm.scriptJob(e=["Undo", undoRedoCallback])
 pm.scriptJob(e=["Redo", undoRedoCallback])
@@ -2583,4 +2583,4 @@ pm.scriptJob(e=["Redo", undoRedoCallback])
 skel = None
 editPoseIndex = None
 
-skeleposerWindow = SkeleposerWindow(parent=mayaMainWindow)
+mainWindow = SkeleposerWindow(parent=mayaMainWindow)
