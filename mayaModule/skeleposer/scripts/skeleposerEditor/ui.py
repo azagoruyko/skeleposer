@@ -968,20 +968,21 @@ class PoseTreeWidget(QTreeWidget):
             return
 
         menu = QMenu(self)
-
-        menu.addAction("Add", self.addPoseItem, "Insert")
-
+        menu.addAction("Add", self.addPoseItem)
         if self.selectedItems():
-            menu.addAction("Duplicate", self.duplicatePoseItem, "Ctrl-D")
+            menu.addAction("Duplicate", self.duplicatePoseItem)
+        menu.addSeparator()
+        menu.addAction("Remove", self.removePoseItem)
 
-        menu.addAction("Remove", self.removePoseItem, "Delete")
         menu.popup(event.globalPos())
 
     def keyPressEvent(self, event):
         ctrl = event.modifiers() & Qt.ControlModifier
 
         if ctrl:
+            print("ctrl", Qt.Key_D, event.key())
             if event.key() == Qt.Key_D:
+                
                 self.duplicatePoseItem()
 
         elif event.key() == Qt.Key_Insert:
@@ -1085,29 +1086,13 @@ class PatternTableWidget(QTableWidget):
     def contextMenuEvent(self, event):
         menu = QMenu(self)
 
-        menu.addAction("Add", self.addPatternItem, "Insert")
-
+        menu.addAction("Add", self.addPatternItem)
         if self.selectedItems():
-            menu.addAction("Duplicate", self.duplicatePatternItem, "Ctrl-D")
+            menu.addAction("Duplicate", self.duplicatePatternItem)
+        menu.addSeparator()
+        menu.addAction("Remove", self.removePatternItem)
 
-        menu.addAction("Remove", self.removePatternItem, "Delete")
         menu.popup(event.globalPos())
-
-    def keyPressEvent(self, event):
-        ctrl = event.modifiers() & Qt.ControlModifier
-
-        if ctrl:
-            if event.key() == Qt.Key_D:
-                self.duplicatePatternItem()
-
-        elif event.key() == Qt.Key_Insert:
-            self.addPatternItem()
-
-        elif event.key() == Qt.Key_Delete:
-            self.removePatternItem()
-
-        else:
-            super(PatternTableWidget, self).keyPressEvent(event)
 
     def validateItem(self, item):
         self.blockSignals(True)
