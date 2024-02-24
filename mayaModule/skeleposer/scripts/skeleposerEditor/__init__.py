@@ -1615,6 +1615,9 @@ class TreeWidget(QTreeWidget):
 
                 for i in range(item.childCount()):
                     self.duplicateItems([item.child(i)], newItem)
+                    
+            item.setSelected(False)
+            newItem.setSelected(True)
 
     @undoBlock
     def setupWeightFromSelection(self):
