@@ -980,7 +980,6 @@ class PoseTreeWidget(QTreeWidget):
         ctrl = event.modifiers() & Qt.ControlModifier
 
         if ctrl:
-            print("ctrl", Qt.Key_D, event.key())
             if event.key() == Qt.Key_D:
                 
                 self.duplicatePoseItem()
@@ -1403,6 +1402,7 @@ class MainWindow(QFrame):
         menu.addMenu(bonesMenu)    
 
         toolsMenu = QMenu("Tools", self)
+        toolsMenu.addAction("Setup aliases", self.setupAliases)
         toolsMenu.addAction("Replace in names", self.treeWidget.searchWindow.show, "Ctrl+R")
         toolsMenu.addAction("Collapse others", self.treeWidget.collapseOthers, "Ctrl+Space")
         toolsMenu.addAction(QIcon(RootDirectory+"/icons/layer.png"), "Add joint hierarchy as layer", self.treeWidget.addJointsAsLayer)
@@ -1430,6 +1430,11 @@ class MainWindow(QFrame):
         self.jointsListWidget.clearItems()
         self.jointsListWidget.addItems(sorted(poseJoints), bold=True) # pose joints
         self.jointsListWidget.addItems(sorted(allJoints-poseJoints), foreground=QColor(100, 100, 100)) # all joints
+
+    def setupAliases(self):
+        if not skel or not skel.node.exists():
+            return
+        skel.setupAliases()
 
     def newNode(self):
         self.selectSkeleposer(pm.createNode("skeleposer"))

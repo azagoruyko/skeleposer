@@ -1,2 +1,2 @@
-from . import ui
-from . import skeleposer
+from .ui import *
+from .skeleposer import *

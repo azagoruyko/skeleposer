@@ -358,21 +358,24 @@ class Skeleposer(object):
             if mirror_idx is None: # if mirror joint is not connected, skip
                 continue
 
-            j_mbase = utils.dagPose_getWorldMatrix(dagPose, j) # get base world matrices
-            mirrored_mbase = utils.dagPose_getWorldMatrix(dagPose, j_mirrored)
-
             j_pmat = utils.dagPose_getParentMatrix(dagPose, j)
+            j_mbase = utils.dagPose_getWorldMatrix(dagPose, j)
+
             mirrored_pmat = utils.dagPose_getParentMatrix(dagPose, j_mirrored)
+            mirrored_pmatInv = mirrored_pmat.inverse()
+            mirrored_mbase = utils.dagPose_getWorldMatrix(dagPose, j_mirrored)  
 
             delta = self.node.poses[poseIndex].poseDeltaMatrices[idx].get()
-            jm = utils.applyDelta(delta, j_mbase) if blendMode == 0 else om.MMatrix(delta) * j_pmat
+            jm = utils.applyDelta(delta, j_mbase * j_pmat.inverse()) if blendMode == 0 else om.MMatrix(delta)
+            jm *= j_pmat
 
             mirrored_m = utils.mirrorMatrixByDelta(j_mbase, jm, mirrored_mbase)
 
             if j == j_mirrored:
                 mirrored_m = utils.blendMatrices(jm, mirrored_m, 0.5)
 
-            self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].set(utils.getDelta(mirrored_m, mirrored_mbase) if blendMode == 0 else mirrored_m * mirrored_pmat.inverse())
+            mirrored_delta = utils.getDelta(mirrored_m * mirrored_pmatInv, mirrored_mbase * mirrored_pmatInv) if blendMode == 0 else mirrored_m * mirrored_pmatInv
+            self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].set(mirrored_delta)
 
     @utils.undoBlock
     def flipPose(self, poseIndex):
@@ -394,26 +397,28 @@ class Skeleposer(object):
             if mirror_idx is None: # if mirror joint is not connected, skip
                 continue
 
-            j_mbase = utils.dagPose_getWorldMatrix(dagPose, j)
-            mirrored_mbase = utils.dagPose_getWorldMatrix(dagPose, j_mirrored)
-
             j_pmat = utils.dagPose_getParentMatrix(dagPose, j)
+            j_pmatInv = j_pmat.inverse()
+            j_mbase = utils.dagPose_getWorldMatrix(dagPose, j)
+
             mirrored_pmat = utils.dagPose_getParentMatrix(dagPose, j_mirrored)
+            mirrored_pmatInv = mirrored_pmat.inverse()
+            mirrored_mbase = utils.dagPose_getWorldMatrix(dagPose, j_mirrored)
 
             j_delta = self.node.poses[poseIndex].poseDeltaMatrices[idx].get()
             mirrored_delta = self.node.poses[poseIndex].poseDeltaMatrices[mirror_idx].get()
 
-            jm = utils.applyDelta(j_delta, j_mbase) if blendMode == 0 else om.MMatrix(j_delta) * j_pmat
-            mirrored_jm = utils.applyDelta(mirrored_delta, mirrored_mbase) if blendMode == 0 else om.MMatrix(mirrored_delta) * mirrored_pmat
+            jm = utils.applyDelta(j_delta, j_mbase * j_pmatInv) if blendMode == 0 else om.MMatrix(j_delta)
+            jm *= j_pmat
 
-            j_pmat = utils.dagPose_getParentMatrix(dagPose, j)
-            mirrored_pmat = utils.dagPose_getParentMatrix(dagPose, j_mirrored)
+            mirrored_jm = utils.applyDelta(mirrored_delta, mirrored_mbase * mirrored_pmatInv) if blendMode == 0 else om.MMatrix(mirrored_delta)
+            mirrored_jm *= mirrored_pmat
 
             m = utils.mirrorMatrixByDelta(mirrored_mbase, mirrored_jm, j_mbase)
             mirrored_m = utils.mirrorMatrixByDelta(j_mbase, jm, mirrored_mbase)
 
-            output[idx] = utils.getDelta(m, j_mbase) if blendMode == 0 else m * j_pmat.inverse()
-            output[mirror_idx] = utils.getDelta(mirrored_m, mirrored_mbase) if blendMode == 0 else mirrored_m * mirrored_pmat.inverse()
+            output[idx] = utils.getDelta(m * j_pmatInv, j_mbase * j_pmatInv) if blendMode == 0 else m * j_pmatInv
+            output[mirror_idx] = utils.getDelta(mirrored_m * mirrored_pmatInv, mirrored_mbase * mirrored_pmatInv) if blendMode == 0 else mirrored_m * mirrored_pmatInv
 
         for idx in output:
             self.node.poses[poseIndex].poseDeltaMatrices[idx].set(output[idx])
@@ -473,6 +478,37 @@ class Skeleposer(object):
                 pm.connectAttr(connectionsData[idx][a], j+"."+a, f=True)
 
         self.node.connectionsData.set("")
+
+    @utils.undoBlock
+    def setupAliases(self, value=True):
+        def setupAlias(attr, name, *, prefix=""):
+            name = str(name)
+            isValidName = lambda n: re.match("^\\w[\\w\\d_]*$", n)
+
+            if pm.aliasAttr(attr, q=True):
+                pm.aliasAttr(attr, rm=True)
+
+            if isValidName(name) and value:
+                pm.aliasAttr(prefix+name, attr)
+
+        for plug in self.node.joints:
+            idx = plug.index()
+            n = self.getJointByIndex(idx)
+            setupAlias(self.node.joints[idx], n, prefix="j_")
+            setupAlias(self.node.baseMatrices[idx], n, prefix="bm_")
+            setupAlias(self.node.jointOrients[idx], n, prefix="jo_")
+            setupAlias(self.node.outputTranslates[idx], n, prefix="t_")
+            setupAlias(self.node.outputRotates[idx], n, prefix="r_")
+            setupAlias(self.node.outputScales[idx], n, prefix="s_")
+
+        for plug in self.node.poses:
+            n = plug.poseName.get() or ""
+            setupAlias(plug, n, prefix="p_")
+            setupAlias(plug.poseWeight, n)
+
+        for plug in self.node.directories:
+            n = plug.directoryName.get() or ""
+            setupAlias(plug, n, prefix="d_")
 
     @utils.undoBlock
     def beginEditPose(self, idx):
