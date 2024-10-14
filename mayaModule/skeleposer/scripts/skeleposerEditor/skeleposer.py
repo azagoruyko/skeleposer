@@ -480,7 +480,7 @@ class Skeleposer(object):
         self.node.connectionsData.set("")
 
     @utils.undoBlock
-    def setupAliases(self, value=True):
+    def setupAliases(self, install=True):
         def setupAlias(attr, name, *, prefix=""):
             name = str(name)
             isValidName = lambda n: re.match("^\\w[\\w\\d_]*$", n)
@@ -488,7 +488,7 @@ class Skeleposer(object):
             if pm.aliasAttr(attr, q=True):
                 pm.aliasAttr(attr, rm=True)
 
-            if isValidName(name) and value:
+            if isValidName(name) and install:
                 pm.aliasAttr(prefix+name, attr)
 
         for plug in self.node.joints:

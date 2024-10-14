@@ -1434,7 +1434,8 @@ class MainWindow(QFrame):
     def setupAliases(self):
         if not skel or not skel.node.exists():
             return
-        skel.setupAliases()
+        skel.setupAliases(False) # uninstall
+        skel.setupAliases(True)
 
     def newNode(self):
         self.selectSkeleposer(pm.createNode("skeleposer"))
