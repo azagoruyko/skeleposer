@@ -348,11 +348,18 @@ class Skeleposer(object):
         for j in joints:
             idx = self.getJointIndex(j)
 
-            j_mirrored = utils.findSymmetricName(str(j), right=False) # find right side joint
-            if not j_mirrored or not cmds.objExists(j_mirrored):
+            if utils.isRightSide(j): # skip right side
                 continue
 
-            j_mirrored = pm.PyNode(j_mirrored)
+            if utils.isLeftSide(j): 
+                j_mirrored = utils.findSymmetricName(str(j), right=False)
+                if not j_mirrored or not cmds.objExists(j_mirrored): # skip non-existing joints
+                    continue
+
+                j_mirrored = pm.PyNode(j_mirrored)
+
+            else: # middle joints
+                j_mirrored = j            
 
             mirror_idx = self.getJointIndex(j_mirrored)
             if mirror_idx is None: # if mirror joint is not connected, skip
@@ -387,11 +394,15 @@ class Skeleposer(object):
         for j in self.getPoseJoints(poseIndex):
             idx = self.getJointIndex(j)
 
-            j_mirrored = utils.findSymmetricName(str(j))
-            if not j_mirrored or not cmds.objExists(j_mirrored):
-                continue
+            if utils.isLeftSide(j) or utils.isRightSide(j): 
+                j_mirrored = utils.findSymmetricName(str(j))
+                if not j_mirrored or not cmds.objExists(j_mirrored): # skip non-existing joints
+                    continue
 
-            j_mirrored = pm.PyNode(j_mirrored)
+                j_mirrored = pm.PyNode(j_mirrored)
+
+            else: # middle joints
+                j_mirrored = j 
 
             mirror_idx = self.getJointIndex(j_mirrored)
             if mirror_idx is None: # if mirror joint is not connected, skip
