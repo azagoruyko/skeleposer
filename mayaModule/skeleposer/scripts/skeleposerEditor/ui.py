@@ -3,9 +3,9 @@ import os
 import json
 from contextlib import contextmanager
 
-from PySide2.QtGui import *
-from PySide2.QtCore import *
-from PySide2.QtWidgets import *
+from PySide6.QtGui import *
+from PySide6.QtCore import *
+from PySide6.QtWidgets import *
 
 import maya.api.OpenMaya as om
 import pymel.core as pm
@@ -14,7 +14,7 @@ import maya.cmds as cmds
 from . import utils
 from .skeleposer import Skeleposer
 
-from shiboken2 import wrapInstance
+from shiboken6 import wrapInstance
 mayaMainWindow = wrapInstance(int(pm.api.MQtUtil.mainWindow()), QMainWindow)
 
 RootDirectory = os.path.dirname(__file__)
@@ -93,7 +93,7 @@ def getAllParents(item):
 def centerWindow(w):
     # center the window on the screen
     qr = w.frameGeometry()
-    cp = QDesktopWidget().availableGeometry().center()
+    cp = QApplication.primaryScreen().availableGeometry().center()
     qr.moveCenter(cp)
     w.move(qr.topLeft())
 
@@ -120,7 +120,7 @@ def makePoseItem(poseIndex):
     item = QTreeWidgetItem([skel.node.poses[poseIndex].poseName.get() or ""])
     item.setIcon(0, QIcon(RootDirectory+"/icons/pose.png"))
     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled)
-    item.setToolTip(0, ".poses[%d]"%poseIndex)
+    item.setToolTip(0, f".poses[{poseIndex}]")
     item.poseIndex = poseIndex
     item.directoryIndex = None
 
@@ -131,7 +131,7 @@ def makeDirectoryItem(directoryIndex):
     item = QTreeWidgetItem([skel.node.directories[directoryIndex].directoryName.get() or ""])
     item.setIcon(0, QIcon(RootDirectory+"/icons/directory.png"))
     item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
-    item.setToolTip(0, ".directories[%d]"%directoryIndex)
+    item.setToolTip(0, f".directories[{directoryIndex}]")
     item.poseIndex = None
     item.directoryIndex = directoryIndex
 
@@ -140,7 +140,7 @@ def makeDirectoryItem(directoryIndex):
 
 class ChangeButtonWidget(QWidget):
     def __init__(self, item, label=" ", **kwargs):
-        super(ChangeButtonWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.item = item
 
@@ -189,7 +189,7 @@ class SearchReplaceWindow(QDialog):
     replaceClicked = Signal(str, str)
 
     def __init__(self, **kwargs):
-        super(SearchReplaceWindow, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.setWindowTitle("Search/Replace")
         layout = QGridLayout()
         layout.setDefaultPositioning(2, Qt.Horizontal)
@@ -214,7 +214,7 @@ class SearchReplaceWindow(QDialog):
 
 class TreeWidget(QTreeWidget):
     def __init__(self, **kwargs):
-        super(TreeWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.clipboard = []
 
@@ -222,7 +222,7 @@ class TreeWidget(QTreeWidget):
         self.searchWindow.replaceClicked.connect(self.searchAndReplace)
 
         self.setHeaderLabels(["Name", "Value", "Edit", "Driver"])
-        self.header().setSectionResizeMode(QHeaderView.ResizeToContents) # Qt5
+        self.header().setSectionResizeMode(QHeaderView.ResizeToContents)
 
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDragEnabled(True)
@@ -673,7 +673,7 @@ class BlendSliderWidget(QWidget):
     valueChanged = Signal(float)
 
     def __init__(self, **kwargs):
-        super(BlendSliderWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         layout = QHBoxLayout()
         layout.setMargin(0)
@@ -707,7 +707,7 @@ class BlendSliderWidget(QWidget):
 
 class ToolsWidget(QWidget):
     def __init__(self, **kwargs):
-        super(ToolsWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         layout = QHBoxLayout()
         layout.setMargin(0)
@@ -770,7 +770,7 @@ class NodeSelectorWidget(QWidget):
     nodeChanged = Signal(object)
 
     def __init__(self, **kwargs):
-        super(NodeSelectorWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         layout = QHBoxLayout()
         layout.setMargin(0)
@@ -806,7 +806,7 @@ class ChangeDriverDialog(QDialog):
     cleared = Signal()
 
     def __init__(self, plug=None, limit="1", **kwargs):
-        super(ChangeDriverDialog, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.setWindowTitle("Change driver")
 
@@ -888,7 +888,7 @@ class ChangeDriverDialog(QDialog):
 
 class WideSplitterHandle(QSplitterHandle):
     def __init__(self, orientation, parent, **kwargs):
-        super(WideSplitterHandle, self).__init__(orientation, parent, **kwargs)
+        super().__init__(orientation, parent, **kwargs)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -899,7 +899,7 @@ class WideSplitterHandle(QSplitterHandle):
 
 class WideSplitter(QSplitter):
     def __init__(self, orientation, **kwargs):
-        super(WideSplitter, self).__init__(orientation, **kwargs)
+        super().__init__(orientation, **kwargs)
         self.setHandleWidth(7)
 
     def createHandle(self):
@@ -907,7 +907,7 @@ class WideSplitter(QSplitter):
 
 class ListWithFilterWidget(QWidget):
     def __init__(self, **kwargs):
-        super(ListWithFilterWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0,0,0,0)
@@ -952,7 +952,7 @@ class PoseTreeWidget(QTreeWidget):
     somethingChanged = Signal()
 
     def __init__(self, **kwargs):
-        super(PoseTreeWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.setHeaderLabels(["Name"])
         self.header().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -991,7 +991,7 @@ class PoseTreeWidget(QTreeWidget):
             self.removePoseItem()
 
         else:
-            super(PoseTreeWidget, self).keyPressEvent(event)
+            super().keyPressEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mouseButtons() == Qt.MiddleButton:
@@ -1072,7 +1072,7 @@ class PatternTableWidget(QTableWidget):
     somethingChanged = Signal()
 
     def __init__(self, **kwargs):
-        super(PatternTableWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -1142,7 +1142,7 @@ class PatternTableWidget(QTableWidget):
 
 class SplitPoseWidget(QWidget):
     def __init__(self, **kwargs):
-        super(SplitPoseWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
@@ -1222,7 +1222,7 @@ class SplitPoseWidget(QWidget):
 
                 if sourcePose:
                     data = dict(ch.data(0, Qt.UserRole))
-                    print("Split pose '{}'' into '{}' with {}".format(sourcePose, destPose, str(data)))
+                    print(f"Split pose '{sourcePose}' into '{destPose}' with {data}")
                     skel.addSplitPose(sourcePose, destPose, **data)
 
                 splitPoses(ch, destPose)
@@ -1233,7 +1233,7 @@ class SplitPoseWidget(QWidget):
                 children.append(item.child(i).text(0))
 
             if sourcePose and children:
-                print("Split blend '{}' into '{}'".format(sourcePose, " ".join(children)))
+                print(f"Split blend '{sourcePose}' into '{' '.join(children)}'")
                 skel.addSplitBlends(blendShape, sourcePose, children)
 
             for i in range(item.childCount()):
@@ -1281,7 +1281,7 @@ class SkeleposerSelectorWidget(QLineEdit):
     nodeChanged = Signal(str)
 
     def __init__(self, **kwargs):
-        super(SkeleposerSelectorWidget, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.setPlaceholderText("Right click to select skeleposer from scene")
         self.setReadOnly(True)
 
@@ -1300,11 +1300,11 @@ class SkeleposerSelectorWidget(QLineEdit):
                     pm.rename(oldName, newName)
                     self.setText(skel.node.name())
         else:
-            super(SkeleposerSelectorWidget, self).mouseDoubleClickEvent(event)
+            super().mouseDoubleClickEvent(event)
 
 class MainWindow(QFrame):
     def __init__(self, **kwargs):
-        super(MainWindow, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self._callbacks = []
 

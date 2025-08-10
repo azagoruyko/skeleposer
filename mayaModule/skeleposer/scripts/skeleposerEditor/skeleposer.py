@@ -1,5 +1,6 @@
 import json
 import re
+from typing import List, Optional, Dict, Any, Union
 
 import maya.api.OpenMaya as om
 import pymel.core as pm
@@ -7,10 +8,13 @@ import maya.cmds as cmds
 
 from . import utils
 
-class Skeleposer(object):
+class Skeleposer:
+    """Main class for managing skeletal poses and transformations in Maya."""
+    
     TrackAttrs = ["t","tx","ty","tz","r","rx","ry","rz","s","sx","sy","sz"]
 
-    def __init__(self, node=None):
+    def __init__(self, node: Optional[str] = None):
+        """Initialize Skeleposer with existing or new node."""
         self._editPoseData = {}
 
         if pm.objExists(node):
@@ -22,6 +26,7 @@ class Skeleposer(object):
         self.addInternalAttributes()
 
     def addInternalAttributes(self):
+        """Add required internal attributes to the skeleposer node."""
         if not self.node.hasAttr("dagPose"):
             self.node.addAttr("dagPose", at="message")
 
@@ -31,25 +36,29 @@ class Skeleposer(object):
         if not self.node.hasAttr("splitPosesData"):
             self.node.addAttr("splitPosesData", dt="string")            
 
-    def findAvailableDirectoryIndex(self):
+    def findAvailableDirectoryIndex(self) -> int:
+        """Find next available directory index."""
         idx = 0
         while self.node.directories[idx].exists():
             idx += 1
         return idx
 
-    def findAvailablePoseIndex(self):
+    def findAvailablePoseIndex(self) -> int:
+        """Find next available pose index."""
         idx = 0
         while self.node.poses[idx].exists():
             idx += 1
         return idx
 
-    def findAvailableJointIndex(self):
+    def findAvailableJointIndex(self) -> int:
+        """Find next available joint index."""
         idx = 0
         while self.node.joints[idx].exists() and self.node.joints[idx].isConnected():
             idx += 1
         return idx
 
-    def getJointIndex(self, joint):
+    def getJointIndex(self, joint) -> Optional[int]:
+        """Get index of joint in skeleposer node."""
         plugs = [p for p in joint.message.outputs(p=True) if p.node() == self.node]
         if plugs:
             return plugs[0].index()
@@ -62,6 +71,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def clearAll(self):
+        """Clear all joints, poses and directories from the node."""
         for a in self.node.joints:
             pm.removeMultiInstance(a, b=True)
 
@@ -97,19 +107,20 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def updateBaseMatrices(self):
+        """Update base matrices for all connected joints."""
         for ja in self.node.joints:
             inputs = ja.inputs()
             bm = self.node.baseMatrices[ja.index()]
             if inputs and bm.isSettable():
                 bm.set(utils.getLocalMatrix(inputs[0]))
             else:
-                pm.warning("updateBaseMatrices: %s is not writable. Skipped"%bm.name())
+                pm.warning(f"updateBaseMatrices: {bm.name()} is not writable. Skipped")
 
         self.updateDagPose()
 
     @utils.undoBlock
     def makeCorrectNode(self, drivenIndex, driverIndexList):
-        c = pm.createNode("combinationShape", n=self.node.name()+"_"+str(drivenIndex)+"_combinationShape")
+        c = pm.createNode("combinationShape", n=f"{self.node.name()}_{drivenIndex}_combinationShape")
         c.combinationMethod.set(1) # lowest weighting
         for i, idx in enumerate(driverIndexList):
             self.node.poses[idx].poseWeight >> c.inputWeight[i]
@@ -118,13 +129,14 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def makeInbetweenNode(self, drivenIndex, driverIndex):
-        rv = pm.createNode("remapValue", n=self.node.name()+"_"+str(drivenIndex)+"_remapValue")
+        rv = pm.createNode("remapValue", n=f"{self.node.name()}_{drivenIndex}_remapValue")
         self.node.poses[driverIndex].poseWeight >> rv.inputValue
         rv.outValue >> self.node.poses[drivenIndex].poseWeight
         return rv
 
     @utils.undoBlock
     def addJoints(self, joints):
+        """Add joints to the skeleposer system."""
         for j in joints:
             if self.getJointIndex(j) is None:
                 idx = self.findAvailableJointIndex()
@@ -141,12 +153,13 @@ class Skeleposer(object):
                 self.node.outputRotates[idx] >> j.r
                 self.node.outputScales[idx] >> j.s
             else:
-                pm.warning("addJoints: %s is already connected"%j)
+                pm.warning(f"addJoints: {j} is already connected")
 
         self.updateDagPose()
 
     @utils.undoBlock
     def removeJoints(self, joints):
+        """Remove joints from the skeleposer system."""
         for jnt in joints:
             idx = self.getJointIndex(jnt)
             if idx is not None:
@@ -178,7 +191,7 @@ class Skeleposer(object):
             inputs = ja.inputs()
             if not inputs:
                 self.removeJointByIndex(ja.index())
-                pm.warning("removeEmptyJoints: removing %s as empty"%ja.name())
+                pm.warning(f"removeEmptyJoints: removing {ja.name()} as empty")
 
     @utils.undoBlock
     def updateDagPose(self):
@@ -192,14 +205,15 @@ class Skeleposer(object):
         else:
             pm.warning("updateDagPose: no joints found attached")
 
-    def getJoints(self):
+    def getJoints(self) -> List[Any]:
+        """Get all connected joints."""
         joints = []
         for ja in self.node.joints:
             inputs = ja.inputs(type=["joint", "transform"])
             if inputs:
                 joints.append(inputs[0])
             else:
-                pm.warning("getJoints: %s is not connected"%ja.name())
+                pm.warning(f"getJoints: {ja.name()} is not connected")
         return joints
 
     def getPoseJoints(self, poseIndex):
@@ -210,16 +224,18 @@ class Skeleposer(object):
             if inputs:
                 joints.append(inputs[0])
             else:
-                pm.warning("getPoseJoints: %s is not connected"%ja.name())
+                pm.warning(f"getPoseJoints: {ja.name()} is not connected")
         return joints
 
-    def findPoseIndexByName(self, poseName):
+    def findPoseIndexByName(self, poseName: str) -> Optional[int]:
+        """Find pose index by name."""
         for p in self.node.poses:
             if p.poseName.get() == poseName:
                 return p.index()
 
     @utils.undoBlock
-    def makePose(self, name):
+    def makePose(self, name: str) -> int:
+        """Create new pose with given name."""
         idx = self.findAvailablePoseIndex()
         self.node.poses[idx].poseName.set(name)
 
@@ -229,7 +245,8 @@ class Skeleposer(object):
         return idx
 
     @utils.undoBlock
-    def makeDirectory(self, name, parentIndex=0):
+    def makeDirectory(self, name: str, parentIndex: int = 0) -> int:
+        """Create new directory with given name and parent."""
         idx = self.findAvailableDirectoryIndex()
         directory = self.node.directories[idx]
         directory.directoryName.set(name)
@@ -243,6 +260,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def removePose(self, poseIndex):
+        """Remove pose by index."""
         directoryIndex = self.node.poses[poseIndex].poseDirectoryIndex.get()
 
         indices = self.node.directories[directoryIndex].directoryChildrenIndices.get() or []
@@ -257,6 +275,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def removeDirectory(self, directoryIndex):
+        """Remove directory and all its children recursively."""
         for ch in self.node.directories[directoryIndex].directoryChildrenIndices.get() or []:
             if ch >= 0:
                 self.removePose(ch)
@@ -274,6 +293,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def parentDirectory(self, directoryIndex, newParentIndex, insertIndex=None):
+        """Move directory to new parent."""
         oldParentIndex = self.node.directories[directoryIndex].directoryParentIndex.get()
         self.node.directories[directoryIndex].directoryParentIndex.set(newParentIndex)
 
@@ -292,6 +312,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def parentPose(self, poseIndex, newDirectoryIndex, insertIndex=None):
+        """Move pose to new directory."""
         oldDirectoryIndex = self.node.poses[poseIndex].poseDirectoryIndex.get()
         self.node.poses[poseIndex].poseDirectoryIndex.set(newDirectoryIndex)
 
@@ -323,6 +344,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def copyPose(self, fromIndex, toIndex, joints=None):
+        """Copy pose data from one pose to another."""
         self.resetDelta(toIndex, joints or self.getPoseJoints(toIndex))
 
         srcPose = self.node.poses[fromIndex]
@@ -340,6 +362,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def mirrorPose(self, poseIndex):
+        """Mirror pose across YZ plane using joint naming convention."""
         dagPose = self.dagPose()
 
         blendMode = self.node.poses[poseIndex].poseBlendMode.get()
@@ -386,6 +409,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def flipPose(self, poseIndex):
+        """Flip pose by swapping left and right side joints."""
         dagPose = self.dagPose()
 
         blendMode = self.node.poses[poseIndex].poseBlendMode.get()
@@ -438,6 +462,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def changePoseBlendMode(self, poseIndex, blend):
+        """Change pose blend mode between additive (0) and replace (1)."""
         dagPose = self.dagPose()
 
         pose = self.node.poses[poseIndex]
@@ -456,6 +481,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def disconnectOutputs(self):
+        """Disconnect all outputs and store connection data."""
         if self.node.connectionsData.get(): # if connectionsData exists
             pm.warning("Disconnection is skipped")
             return          
@@ -477,6 +503,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def reconnectOutputs(self):
+        """Restore previously disconnected outputs."""
         connectionsData = self.node.connectionsData.get()
         if not connectionsData: # if connectionsData doesn't exist
             pm.warning("Connection is skipped")
@@ -492,6 +519,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def setupAliases(self, install=True):
+        """Setup Maya attribute aliases for easier access."""
         def setupAlias(attr, name, *, prefix=""):
             name = str(name)
             isValidName = lambda n: re.match("^\\w[\\w\\d_]*$", n)
@@ -523,6 +551,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def beginEditPose(self, idx):
+        """Start editing pose by disconnecting outputs and storing current state."""
         if self._editPoseData:
             pm.warning("Already in edit mode")
             return
@@ -548,6 +577,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def endEditPose(self):
+        """Finish editing pose and save changes as deltas."""
         if not self._editPoseData:
             pm.warning("Not in edit mode")
             return
@@ -579,9 +609,11 @@ class Skeleposer(object):
         self._editPoseData = {}
 
     def findActivePoseIndex(self, value=0.01):
+        """Find poses with weight above threshold."""
         return [p.index() for p in self.node.poses if p.poseWeight.get() > value]
 
     def getDirectoryData(self, idx=0):
+        """Get directory tree structure as nested dict."""
         data = {"directoryIndex":idx, "children":[]}
         for chIdx in self.node.directories[idx].directoryChildrenIndices.get() or []:
             if chIdx >= 0:
@@ -591,7 +623,8 @@ class Skeleposer(object):
         return data
 
     @utils.undoBlock
-    def addSplitPose(self, srcPoseName, destPoseName, **kwargs): # addSplitPose("brows_up", "L_brow_up_inner", R_=0, M_=0.5, L_brow_2=0.3, L_brow_3=0, L_brow_4=0)
+    def addSplitPose(self, srcPoseName, destPoseName, **kwargs):
+        """Split pose into multiple poses based on joint name patterns.""" # addSplitPose("brows_up", "L_brow_up_inner", R_=0, M_=0.5, L_brow_2=0.3, L_brow_3=0, L_brow_4=0)
         srcPose = None
         destPose = None
         for p in self.node.poses:
@@ -627,6 +660,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def addSplitBlends(self, blendShape, targetName, poses):
+        """Split blendShape target into multiple targets driven by poses."""
         def findTargetIndexByName(blend, name):
             for aw in blend.w:
                 if pm.aliasAttr(aw, q=True)==name:
@@ -642,7 +676,7 @@ class Skeleposer(object):
 
         targetIndex = findTargetIndexByName(blendShape, targetName)
         if targetIndex is None:
-            pm.warning("Cannot find '{}' target in {}".format(targetName, blendShape))
+            pm.warning(f"Cannot find '{targetName}' target in {blendShape}")
             return
 
         mesh = blendShape.getOutputGeometry()[0]
@@ -681,13 +715,13 @@ class Skeleposer(object):
                     pose.poseWeight.set(0)
 
             else:
-                pm.warning("Cannot find '{}' pose".format(poseName))
+                pm.warning(f"Cannot find '{poseName}' pose")
 
         blendShape.envelope.set(1)
 
         targetGeo = pm.PyNode(pm.sculptTarget(blendShape, e=True, regenerate=True, target=targetIndex)[0])
         targetIndices, targetDeltas = utils.getBlendShapeTargetDelta(blendShape, targetIndex)
-        targetComponents = ["vtx[%d]"%v for v in targetIndices]
+        targetComponents = [f"vtx[{v}]" for v in targetIndices]
 
         targetDeltaList = []
         for poseName in poses: # per pose
@@ -718,6 +752,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def addJointsAsLayer(self, rootJoint, shouldTransferSkin=True):
+        """Add joint hierarchy as layer with skin transfer option."""
         rootJoint = pm.PyNode(rootJoint)
         joints = [rootJoint] + rootJoint.listRelatives(type="joint", ad=True, c=True)
 
@@ -753,7 +788,8 @@ class Skeleposer(object):
 
         return skelJoints[rootJoint]
 
-    def toJson(self):
+    def toJson(self) -> Dict[str, Any]:
+        """Export skeleposer data to JSON format."""
         data = {"joints":{}, "baseMatrices":{}, "poses": {}, "directories": {}, "splitPosesData": {}}
 
         for j in self.node.joints:
@@ -762,7 +798,7 @@ class Skeleposer(object):
                 data["joints"][j.index()] = inputs[0].name()
 
         for bm in self.node.baseMatrices:
-            a = "{}.baseMatrices[{}]".format(self.node, bm.index())
+            a = f"{self.node}.baseMatrices[{bm.index()}]"
             data["baseMatrices"][bm.index()] = [utils.shortenValue(v) for v in cmds.getAttr(a)]
 
         for d in self.node.directories:
@@ -807,14 +843,15 @@ class Skeleposer(object):
             poseData["poseDeltaMatrices"] = {}
 
             for m in p.poseDeltaMatrices:
-                a = "{}.poses[{}].poseDeltaMatrices[{}]".format(self.node, p.index(), m.index())
+                a = f"{self.node}.poses[{p.index()}].poseDeltaMatrices[{m.index()}]"
                 poseData["poseDeltaMatrices"][m.index()] = [utils.shortenValue(v) for v in cmds.getAttr(a)]
 
         data["splitPosesData"] = json.loads(self.node.splitPosesData.get() or "")
 
         return data
 
-    def fromJson(self, data):
+    def fromJson(self, data: Dict[str, Any]):
+        """Import skeleposer data from JSON format."""
         self.clearAll()
 
         for idx in data["joints"]:
@@ -827,7 +864,7 @@ class Skeleposer(object):
                 pm.warning("fromJson: cannot find "+j)
 
         for idx, m in data["baseMatrices"].items():
-            a = "{}.baseMatrices[{}]".format(self.node, idx)
+            a = f"{self.node}.baseMatrices[{idx}]"
             cmds.setAttr(a, m, type="matrix")
 
         for idx, d in data["directories"].items():
@@ -845,7 +882,7 @@ class Skeleposer(object):
             a.poseBlendMode.set(p["poseBlendMode"])
 
             for m_idx, m in p["poseDeltaMatrices"].items():
-                a = "{}.poses[{}].poseDeltaMatrices[{}]".format(self.node, idx, m_idx)
+                a = f"{self.node}.poses[{idx}].poseDeltaMatrices[{m_idx}]"
                 cmds.setAttr(a, m, type="matrix")
 
             if "corrects" in p: # when corrects found
@@ -860,6 +897,7 @@ class Skeleposer(object):
         self.node.splitPosesData.set(json.dumps(data.get("splitPosesData", "")))
 
     def getWorldPoses(self, joints=None):
+        """Get poses in world space coordinates."""
         dagPose = self.dagPose()
 
         # cache joints matrices
@@ -891,6 +929,7 @@ class Skeleposer(object):
 
     @utils.undoBlock
     def setWorldPoses(self, poses):
+        """Set poses from world space coordinates."""
         dagPose = self.dagPose()
 
         # cache joints matrices
