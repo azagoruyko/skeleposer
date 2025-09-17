@@ -63,7 +63,7 @@ class Skeleposer:
         if plugs:
             return plugs[0].index()
 
-    def getJointByIndex(self, idx):
+    def getJointByIndex(self, idx: int) -> Optional[pm.nt.Joint]:
         if self.node.joints[idx].exists():
             inputs = self.node.joints[idx].inputs()
             if inputs:
@@ -512,7 +512,7 @@ class Skeleposer:
         connectionsData = json.loads(connectionsData)
         for idx in connectionsData:
             for a in connectionsData[idx]:
-                j = self.getJointByIndex(idx)
+                j = self.getJointByIndex(int(idx))
                 pm.connectAttr(connectionsData[idx][a], j+"."+a, f=True)
 
         self.node.connectionsData.set("")
