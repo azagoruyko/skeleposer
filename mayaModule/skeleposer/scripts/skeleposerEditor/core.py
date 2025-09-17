@@ -18,8 +18,11 @@ class Skeleposer:
         self._editPoseData = {}
 
         if pm.objExists(node):
-            self.node = pm.PyNode(node)
-            self.removeEmptyJoints()
+            if pm.objectType(node) == "skeleposer":
+                self.node = pm.PyNode(node)
+                self.removeEmptyJoints()
+            else:
+                pm.error(f"{node} is not a skeleposer node")
         else:
             self.node = pm.createNode("skeleposer", n=node)
 
