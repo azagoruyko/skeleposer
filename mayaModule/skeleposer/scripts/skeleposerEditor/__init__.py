@@ -1,2 +1,2 @@
 from .ui import *
-from .skeleposer import *
+from .core import *

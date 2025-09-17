@@ -12,7 +12,7 @@ import pymel.core as pm
 import maya.cmds as cmds
 
 from . import utils
-from .skeleposer import Skeleposer
+from .core import Skeleposer
 
 from shiboken6 import wrapInstance
 mayaMainWindow = wrapInstance(int(pm.api.MQtUtil.mainWindow()), QMainWindow)
