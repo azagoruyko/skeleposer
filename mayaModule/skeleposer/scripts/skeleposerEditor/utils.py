@@ -11,7 +11,8 @@ NamingScheme = {
     "RightMiddle": {"Right":"Left", "_R_":"_L_", "_r_":"_l_"},
 }
 
-def findSymmetricName(name, left=True, right=True):
+def findSymmetricName(name: str, left: bool = True, right: bool = True) -> str:
+    """Find the symmetric equivalent of a given name based on naming conventions."""
     leftData = (left, NamingScheme["LeftStart"], NamingScheme["LeftMiddle"], NamingScheme["LeftEnd"])
     rightData = (right, NamingScheme["RightStart"], NamingScheme["RightMiddle"], NamingScheme["RightEnd"])
 
@@ -30,7 +31,8 @@ def findSymmetricName(name, left=True, right=True):
                     idx = name.index(s)
                     return name[:idx] + mids[s] + name[idx+len(s):]
 
-def isLeftSide(name):
+def isLeftSide(name: str) -> bool:
+    """Check if a name belongs to the left side based on naming conventions."""
     for s in NamingScheme["LeftStart"]:
         if name.startswith(s):
             return True
@@ -43,7 +45,8 @@ def isLeftSide(name):
         if s in name:
             return True
 
-def isRightSide(name):
+def isRightSide(name: str) -> bool:
+    """Check if a name belongs to the right side based on naming conventions."""
     for s in NamingScheme["RightStart"]:
         if name.startswith(s):
             return True
@@ -57,6 +60,7 @@ def isRightSide(name):
             return True
 
 def undoBlock(f):
+    """Decorator that wraps a function in Maya's undo block for atomic undo operations."""
     def inner(*args,**kwargs):
         pm.undoInfo(ock=True, cn=f.__name__)
         try:
@@ -66,46 +70,55 @@ def undoBlock(f):
         return out
     return inner
 
-def clamp(v, mn=0.0, mx=1.0):
+def clamp(v: float, mn: float = 0.0, mx: float = 1.0) -> float:
+    """Clamp a value between minimum and maximum bounds."""
     if v > mx:
         return mx
     elif v < mn:
         return mn
     return v
 
-def shortenValue(v, epsilon=1e-5):
+def shortenValue(v: float, epsilon: float = 1e-5) -> float:
+    """Round a value to the nearest integer if within epsilon tolerance."""
     roundedValue = round(v)
     return roundedValue if abs(v - roundedValue) < epsilon else v
 
-def maxis(m, a):
+def maxis(m: om.MMatrix, a: int) -> om.MVector:
+    """Extract axis vector from a 4x4 matrix (0=X, 1=Y, 2=Z, 3=Translation)."""
     return om.MVector(m[a*4+0], m[a*4+1], m[a*4+2])
 
-def set_maxis(m, a, v):
+def set_maxis(m: om.MMatrix, a: int, v: om.MVector):
+    """Set axis vector in a 4x4 matrix (0=X, 1=Y, 2=Z, 3=Translation)."""
     m[a*4+0] = v[0]
     m[a*4+1] = v[1]
     m[a*4+2] = v[2]
 
-def mscale(m):
+def mscale(m: om.MMatrix) -> om.MVector:
+    """Extract scale values from a transformation matrix."""
     return om.MVector(maxis(m,0).length(), maxis(m,1).length(), maxis(m,2).length())
 
-def set_mscale(m, s):
+def set_mscale(m: om.MMatrix, s: om.MVector):
+    """Apply scale values to a transformation matrix preserving rotation."""
     set_maxis(m, 0, maxis(m, 0).normal()*s[0])
     set_maxis(m, 1, maxis(m, 1).normal()*s[1])
     set_maxis(m, 2, maxis(m, 2).normal()*s[2])
 
-def mscaled(m, s=om.MVector(1,1,1)):
+def mscaled(m: om.MMatrix, s: om.MVector = om.MVector(1,1,1)) -> om.MMatrix:
+    """Return a copy of the matrix with modified scale values."""
     m = om.MMatrix(m)
     set_maxis(m, 0, maxis(m, 0).normal()*s[0])
     set_maxis(m, 1, maxis(m, 1).normal()*s[1])
     set_maxis(m, 2, maxis(m, 2).normal()*s[2])
     return m
 
-def slerp(q1, q2, w):
+def slerp(q1: tuple, q2: tuple, w: float) -> om.MQuaternion:
+    """Perform spherical linear interpolation between two quaternions."""
     q1 = om.MQuaternion(q1[0], q1[1], q1[2], q1[3])
     q2 = om.MQuaternion(q2[0], q2[1], q2[2], q2[3])
     return om.MQuaternion.slerp(q1, q2, w)
 
-def blendMatrices(m1, m2, w):
+def blendMatrices(m1: om.MMatrix, m2: om.MMatrix, w: float) -> om.MMatrix:
+    """Blend two transformation matrices using linear and spherical interpolation."""
     m1 = om.MMatrix(m1)
     m2 = om.MMatrix(m2)
 
@@ -118,10 +131,8 @@ def blendMatrices(m1, m2, w):
     set_maxis(m, 3, maxis(m1, 3)*(1-w) + maxis(m2, 3)*w)
     return m
 
-def getLocalMatrix(joint):
-    '''
-    Get joint local matrix: t, r*jo, s
-    '''
+def getLocalMatrix(joint: pm.PyNode) -> om.MMatrix:
+    """Get joint's local transformation matrix including joint orient."""
     q = om.MQuaternion(joint.getRotation().asQuaternion())
 
     if cmds.objectType(str(joint)) == "joint":
@@ -144,7 +155,8 @@ def getLocalMatrix(joint):
 
     return om.MMatrix(m)
 
-def getDelta(m, bm): # get delta matrix from pose world matrix
+def getDelta(m: om.MMatrix, bm: om.MMatrix) -> om.MMatrix:
+    """Calculate delta transformation between pose matrix and base matrix."""
     m = om.MMatrix(m)
     bm = om.MMatrix(bm)
 
@@ -164,7 +176,8 @@ def getDelta(m, bm): # get delta matrix from pose world matrix
     set_mscale(d, [sx,sy,sz])
     return d
 
-def applyDelta(dm, bm):
+def applyDelta(dm: om.MMatrix, bm: om.MMatrix) -> om.MMatrix:
+    """Apply delta transformation to a base matrix."""
     dm = om.MMatrix(dm)
     bm = om.MMatrix(bm)
 
@@ -185,7 +198,8 @@ def applyDelta(dm, bm):
     set_mscale(m, [sx, sy, sz])
     return m
 
-def symmat(m): # flip x axis
+def symmat(m: om.MMatrix) -> om.MMatrix:
+    """Create a symmetric matrix by flipping the X axis."""
     out = om.MMatrix(m)
     out[0] *= -1
     out[4] *= -1
@@ -193,13 +207,16 @@ def symmat(m): # flip x axis
     out[12] *= -1
     return out
 
-def parentConstraintMatrix(destBase, srcBase, src):
+def parentConstraintMatrix(destBase: om.MMatrix, srcBase: om.MMatrix, src: om.MMatrix) -> om.MMatrix:
+    """Calculate resulting matrix as in Maya's parentConstraint transformation."""
     return destBase * srcBase.inverse() * src
 
-def mirrorMatrix(base, srcBase, src):
+def mirrorMatrix(base: om.MMatrix, srcBase: om.MMatrix, src: om.MMatrix) -> om.MMatrix:
+    """Mirror a transformation matrix across the YZ plane."""
     return parentConstraintMatrix(base, symmat(srcBase), symmat(src))
 
-def mirrorMatrixByDelta(srcBase, src, destBase):
+def mirrorMatrixByDelta(srcBase: om.MMatrix, src: om.MMatrix, destBase: om.MMatrix) -> om.MMatrix:
+    """Mirror matrix using delta transformation between source and destination."""
     mirroredSrcBase = mirrorMatrix(om.MMatrix(), om.MMatrix(), srcBase)
     mirroredSrc = mirrorMatrix(om.MMatrix(), om.MMatrix(), src)
 
@@ -210,18 +227,21 @@ def mirrorMatrixByDelta(srcBase, src, destBase):
 
     return parentConstraintMatrix(destBase, mirroredSrcBase, mirroredSrc)
 
-def dagPose_findIndex(dagPose, j):
+def dagPose_findIndex(dagPose: pm.PyNode, j: pm.PyNode) -> int:
+    """Find the index of a joint in a dagPose node."""
     for m in dagPose.members:
         inputs = m.inputs(sh=True)
         if inputs and inputs[0] == j:
             return m.index()
 
-def dagPose_getWorldMatrix(dagPose, j):
+def dagPose_getWorldMatrix(dagPose: pm.PyNode, j: pm.PyNode) -> om.MMatrix:
+    """Get world matrix of a joint from a dagPose node."""
     idx = dagPose_findIndex(dagPose, j)
     if idx is not None:
         return om.MMatrix(dagPose.worldMatrix[idx].get())
 
-def dagPose_getParentMatrix(dagPose, j):
+def dagPose_getParentMatrix(dagPose: pm.PyNode, j: pm.PyNode) -> om.MMatrix:
+    """Get parent world matrix of a joint from a dagPose node."""
     idx = dagPose_findIndex(dagPose, j)
     if idx is not None:
         parent = dagPose.parents[idx].inputs(p=True, sh=True)
@@ -229,7 +249,8 @@ def dagPose_getParentMatrix(dagPose, j):
             return om.MMatrix(dagPose.worldMatrix[parent[0].index()].get())
     return om.MMatrix()
 
-def getRemapInputPlug(remap):
+def getRemapInputPlug(remap: pm.PyNode) -> pm.Attribute:
+    """Get the actual input plug connected to a remapValue node."""
     inputs = remap.inputValue.inputs(p=True)
     if inputs:
         inputPlug = inputs[0]
@@ -240,7 +261,8 @@ def getRemapInputPlug(remap):
         else:
             return inputPlug
 
-def getRemapActualWeightInput(plug):
+def getRemapActualWeightInput(plug: pm.Attribute) -> pm.Attribute:
+    """Get the actual weight input plug bypassing remapValue and unitConversion nodes."""
     inputs = plug.inputs(p=True)
     if inputs:
         inputPlug = inputs[0]
@@ -256,9 +278,11 @@ def getRemapActualWeightInput(plug):
             return inputPlug
 
 def clearUnusedRemapValue():
+    """Delete all remapValue nodes that have no output connections."""
     pm.delete([n for n in pm.ls(type="remapValue") if not n.outValue.isConnected() and not n.outColor.isConnected()])
 
-def getBlendShapeTargetDelta(blendShape, targetIndex):
+def getBlendShapeTargetDelta(blendShape: pm.PyNode, targetIndex: int) -> tuple:
+    """Get vertex indices and delta positions for a blend shape target."""
     targetDeltas = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputPointsTarget.get()
     targetComponentsPlug = blendShape.inputTarget[0].inputTargetGroup[targetIndex].inputTargetItem[6000].inputComponentsTarget.__apimplug__()
 
@@ -272,14 +296,16 @@ def getBlendShapeTargetDelta(blendShape, targetIndex):
 
     return targetIndices, targetDeltas
 
-def matchJoint(j, name=None):
+def matchJoint(j: pm.PyNode, name: str = None) -> pm.PyNode:
+    """Create a new joint matching the world transformation of an existing joint."""
     newj = pm.createNode("joint", n=name or j.name())
     pm.xform(newj, ws=True, m=pm.xform(j, q=True, ws=True, m=True))
     newj.setOrientation(newj.getOrientation()*newj.getRotation().asQuaternion()) # freeze
     newj.setRotation([0,0,0])
     return newj
 
-def transferSkin(src, dest):
+def transferSkin(src: pm.PyNode, dest: pm.PyNode):
+    """Transfer skin cluster connections from source joint to destination joint."""
     for p in src.wm.outputs(p=True, type="skinCluster"):
         dest.wm >> p
 
