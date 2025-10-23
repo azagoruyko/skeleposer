@@ -1,5 +1,4 @@
 <div>
-<img src="https://img.shields.io/github/v/tag/azagoruyko/skeleposer?label=current"/>
 <img src="https://img.shields.io/github/v/release/azagoruyko/skeleposer?logoColor=green&color=green"/>
 <a href="https://github.com/azagoruyko/skeleposer/wiki/Home">
   <img src="https://img.shields.io/badge/docs-here-blue?label=docs"/>
