@@ -676,7 +676,7 @@ class BlendSliderWidget(QWidget):
         super().__init__(**kwargs)
 
         layout = QHBoxLayout()
-        layout.setMargin(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         self.textWidget = QLineEdit("1")
@@ -710,7 +710,7 @@ class ToolsWidget(QWidget):
         super().__init__(**kwargs)
 
         layout = QHBoxLayout()
-        layout.setMargin(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         mirrorJointsBtn = QToolButton()
@@ -773,7 +773,7 @@ class NodeSelectorWidget(QWidget):
         super().__init__(**kwargs)
 
         layout = QHBoxLayout()
-        layout.setMargin(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         self.lineEditWidget = QLineEdit()
