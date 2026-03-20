@@ -951,3 +951,6 @@ class Skeleposer:
                 jdata = jointsData[di]
                 delta = utils.getDelta(poses[pi][di], jdata["baseMatrix"]) if blendMode == 0 else om.MMatrix(poses[pi][di]) * jdata["parentInverseMatrix"]
                 self.node.poses[pi].poseDeltaMatrices[di].set(delta)
+
+# load plugin
+cmds.loadPlugin("skeleposer")
