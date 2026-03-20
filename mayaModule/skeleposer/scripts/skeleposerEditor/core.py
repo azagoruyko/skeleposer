@@ -20,7 +20,7 @@ class Skeleposer:
         if pm.objExists(node):
             if pm.objectType(node) == "skeleposer":
                 self.node = pm.PyNode(node)
-                self.removeEmptyJoints()
+                self.cleanupJoints()
             else:
                 pm.error(f"{node} is not a skeleposer node")
         else:
@@ -147,6 +147,13 @@ class Skeleposer:
         pm.removeMultiInstance(self.node.outputScales[index], b=True)
 
     @utils.undoBlock
+    def cleanupJoints(self):
+        for j in self.node.joints:
+            if not j.isConnected():
+                print(f"cleanupJoints: removing {j.name()} as empty")
+                self.cleanupIndex(j.index())
+
+    @utils.undoBlock
     def addJoints(self, joints):
         """Add joints to the skeleposer system."""
         for j in joints:
@@ -198,14 +205,6 @@ class Skeleposer:
                 if m.index() == jointIndex:
                     pm.removeMultiInstance(m, b=True)
                     break
-
-    @utils.undoBlock                    
-    def removeEmptyJoints(self):
-        for ja in self.node.joints:
-            inputs = ja.inputs()
-            if not inputs:
-                self.removeJointByIndex(ja.index())
-                pm.warning(f"removeEmptyJoints: removing {ja.name()} as empty")
 
     @utils.undoBlock
     def updateDagPose(self):
