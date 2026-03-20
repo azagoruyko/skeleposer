@@ -138,11 +138,22 @@ class Skeleposer:
         return rv
 
     @utils.undoBlock
+    def cleanupIndex(self, index):
+        pm.removeMultiInstance(self.node.joints[index], b=True)
+        pm.removeMultiInstance(self.node.jointOrients[index], b=True)
+        pm.removeMultiInstance(self.node.baseMatrices[index], b=True)
+        pm.removeMultiInstance(self.node.outputTranslates[index], b=True)
+        pm.removeMultiInstance(self.node.outputRotates[index], b=True)
+        pm.removeMultiInstance(self.node.outputScales[index], b=True)
+
+    @utils.undoBlock
     def addJoints(self, joints):
         """Add joints to the skeleposer system."""
         for j in joints:
             if self.getJointIndex(j) is None:
                 idx = self.findAvailableJointIndex()
+                self.cleanupIndex(idx)
+                
                 j.message >> self.node.joints[idx]
 
                 if isinstance(j, pm.nt.Joint):
