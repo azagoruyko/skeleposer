@@ -929,7 +929,7 @@ class ListWithFilterWidget(QWidget):
         for i in range(self.listWidget.count()):
             item = self.listWidget.item(i)
             b = re.search(tx, str(item.text()))
-            self.listWidget.setItemHidden(item, False if b else True)
+            item.setHidden(not b)
 
     def itemSelectionChanged(self):
         pm.select([item.text() for item in self.listWidget.selectedItems()])
